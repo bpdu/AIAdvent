@@ -5,9 +5,8 @@ A simple Telegram bot that asks for user input and sends the prompt to Yandex GP
 ## Features
 
 - Asks user for input (question)
-- Displays "Ask LLM" button
-- Sends the question to Yandex GPT API
-- Returns the GPT response when button is pressed
+- Sends the question directly to Yandex GPT API
+- Returns the GPT response immediately
 
 ## Setup
 
@@ -39,17 +38,14 @@ A simple Telegram bot that asks for user input and sends the prompt to Yandex GP
 
 1. Start a conversation with your bot
 2. Send any text message (question)
-3. Press the "Ask LLM" button that appears
-4. The bot will return the response from Yandex GPT
+3. The bot will immediately return the response from Yandex GPT
 
 ## How It Works
 
 The bot uses the python-telegram-bot library to:
 1. Listen for incoming messages
-2. Store the user's question in the session
-3. Display an inline button "Ask LLM"
-4. When pressed, send the question to Yandex GPT API
-5. Return the GPT response to the user
+2. Send the question directly to Yandex GPT API
+3. Return the GPT response to the user immediately
 
 ## Security
 

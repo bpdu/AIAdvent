@@ -33,22 +33,21 @@ def start(update: Update, context: CallbackContext) -> None:
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    update.message.reply_text('Send me a question and press the "Ask LLM" button to get an answer!')
+    update.message.reply_text('Send me a question and I will answer it using Yandex GPT!')
 
 def ask_question(update: Update, context: CallbackContext) -> None:
-    """Store the user's question and show the 'Ask LLM' button."""
+    """Send the user's question directly to Yandex GPT and return the response."""
     if update.message is None or update.message.text is None:
         update.message.reply_text("Sorry, I couldn't process that message.")
         return
         
     user_question = update.message.text
-    context.user_data['question'] = user_question
     
-    # Create the "Ask LLM" button
-    keyboard = [[InlineKeyboardButton("Ask LLM", callback_data='ask_llm')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Call Yandex GPT API directly
+    gpt_response = call_yandex_gpt(user_question)
     
-    update.message.reply_text(f'Your question: "{user_question}"\nPress the button below to get an answer:', reply_markup=reply_markup)
+    # Send the response directly to the user
+    update.message.reply_text(gpt_response)
 
 def call_yandex_gpt(prompt: str) -> str:
     """Call Yandex GPT API and return the response."""
@@ -116,7 +115,6 @@ def main() -> None:
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, ask_question))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
     # Add error handler
     dispatcher.add_error_handler(error_handler)
