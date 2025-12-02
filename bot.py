@@ -95,7 +95,28 @@ def call_yandex_gpt(prompt: str) -> str:
                 "role": "user",
                 "text": prompt
             }
-        ]
+        ],
+        "json_schema": {
+            "schema": {
+                "properties": {
+                    "request": {
+                        "title": "Request",
+                        "description": "A country name requested by user",
+                        "type": "string"
+                    },
+                    "response": {
+                        "title": "Response",
+                        "description": "A capital of the country, in a word",
+                        "type": "string"
+                    },
+                },
+                "required": [
+                    "request",
+                    "response"
+                ],
+                "type": "object"
+            }   
+        }
     }
     
     try:
