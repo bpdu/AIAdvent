@@ -62,20 +62,9 @@ def call_yandex_gpt(prompt: str) -> str:
     # System prompt to instruct the LLM to respond in JSON format
     system_prompt = (
         """
-        Ты API для получения информации о столицах стран.
+        Ты API для получения любой информации.
+        В ответе используй правильный русский язык без англицизмов.
         ВАЖНО: Твой ответ ДОЛЖЕН быть ТОЛЬКО валидным JSON объектом без дополнительного текста. Не добавляй объяснения, не используй markdown форматирование (```json).
-        
-        Формат ответа:
-        {
-        "country":"название страны",
-        "capital":"название столицы",
-        }
-        
-        Пример правильного ответа:
-        {
-        "country":"Россия",
-        "столица":"Москва",
-        }
         """
     )
     
@@ -101,12 +90,12 @@ def call_yandex_gpt(prompt: str) -> str:
                 "properties": {
                     "request": {
                         "title": "Request",
-                        "description": "A country name requested by user",
+                        "description": "A prompt given of the user",
                         "type": "string"
                     },
                     "response": {
                         "title": "Response",
-                        "description": "A capital of the country, in a word",
+                        "description": "A responce from the LLM",
                         "type": "string"
                     },
                 },
