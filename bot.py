@@ -61,10 +61,14 @@ def call_yandex_gpt(prompt: str) -> str:
     
     # System prompt to instruct the LLM to respond in JSON format
     system_prompt = (
-        "You are a helpful assistant. Please respond to all queries in valid JSON format only, "
-        "without any markdown or additional formatting. The JSON should have exactly this structure: "
+        "You are a helpful assistant. Please respond to all queries in valid JSON format only. "
+        "IMPORTANT: Respond with raw JSON only, without any markdown formatting, code blocks, backticks, or additional text. "
+        "The JSON should have exactly this structure: "
         '{"request": "put here the question from the user", "response": "put here your reply"}. '
-        "Make sure the JSON is valid and contains no syntax errors."
+        "Make sure the JSON is valid and contains no syntax errors. "
+        "Start your response with { and end with } directly, without any additional characters. "
+        "Do not include any text before or after the JSON. "
+        "Do not wrap the JSON in triple backticks or any other formatting."
     )
     
     payload = {
@@ -94,18 +98,6 @@ def call_yandex_gpt(prompt: str) -> str:
     except Exception as e:
         logger.error(f"Error calling Yandex GPT API: {e}")
         return f"Sorry, I encountered an error while processing your request: {str(e)}"
-
-def button_handler(update: Update, context: CallbackContext) -> None:
-    """Handle button presses."""
-    query = update.callback_query
-    query.answer()
-    
-    if query.data == 'ask_llm':
-        user_question = context.user_data.get('question', 'No question provided')
-        # Call Yandex GPT API
-        gpt_response = call_yandex_gpt(user_question)
-        response = f"{gpt_response}"
-        query.edit_message_text(text=response)
 
 def error_handler(update: Update, context: CallbackContext) -> None:
     """Log errors caused by updates."""
