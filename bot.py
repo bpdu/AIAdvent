@@ -43,14 +43,30 @@ def ask_question(update: Update, context: CallbackContext) -> None:
         
     user_question = update.message.text
     
-    # Call Yandex GPT API directly
-    gpt_response = call_yandex_gpt(user_question)
+    # Initialize conversation history in context if it doesn't exist
+    if 'conversation_history' not in context.user_data:
+        context.user_data['conversation_history'] = []
+    
+    # Add user message to conversation history
+    context.user_data['conversation_history'].append({
+        "role": "user",
+        "text": user_question
+    })
+    
+    # Call Yandex GPT API with conversation history
+    gpt_response = call_yandex_gpt(context.user_data['conversation_history'])
+    
+    # Add assistant response to conversation history
+    context.user_data['conversation_history'].append({
+        "role": "assistant",
+        "text": gpt_response
+    })
     
     # Send the response directly to the user
     update.message.reply_text(gpt_response)
 
-def call_yandex_gpt(prompt: str) -> str:
-    """Call Yandex GPT API and return the response in JSON format."""
+def call_yandex_gpt(messages) -> str:
+    """Call Yandex GPT API and return the response."""
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
         return "Yandex API key or folder ID not configured. Please check your environment variables."
     
@@ -73,6 +89,23 @@ def call_yandex_gpt(prompt: str) -> str:
 
 Не продолжай задавать вопросы, если данных достаточно. Если пользователь говорит «хватит» или «покажи план» — немедленно сформируй документ. Не используй фразы вроде «Уточните» — действуй самостоятельно при достаточном объёме данных.
 """
+
+    # Prepare messages list with system prompt
+    formatted_messages = [
+        {
+            "role": "system",
+            "text": system_prompt
+        }
+    ]
+    
+    # Add conversation history
+    if isinstance(messages, list):
+        formatted_messages.extend(messages)
+    else:
+        formatted_messages.append({
+            "role": "user",
+            "text": messages
+        })
     
     payload = {
         "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-5.1/latest",
@@ -81,16 +114,7 @@ def call_yandex_gpt(prompt: str) -> str:
             "temperature": 0.7,
             "maxTokens": 2000
         },
-        "messages": [
-            {
-                "role": "system",
-                "text": system_prompt
-            },
-            {
-                "role": "user",
-                "text": prompt
-            }
-        ],
+        "messages": formatted_messages,
     }
     
     try:
