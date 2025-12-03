@@ -43,7 +43,7 @@ def ask_question(update: Update, context: CallbackContext) -> None:
         
     user_question = update.message.text
     
-    # Initialize conversation history in context if it doesn't exist
+    # Initialize conversation history and current date in context if it doesn't exist
     if 'conversation_history' not in context.user_data:
         context.user_data['conversation_history'] = []
     
@@ -53,8 +53,13 @@ def ask_question(update: Update, context: CallbackContext) -> None:
         "text": user_question
     })
     
+    # Get current date in DDMMYYYY format
+    from datetime import datetime
+    current_date = datetime.now().strftime("%d%m%Y")
+    context.user_data['current_date'] = current_date
+    
     # Call Yandex GPT API with conversation history
-    gpt_response = call_yandex_gpt(context.user_data['conversation_history'])
+    gpt_response = call_yandex_gpt(context.user_data['conversation_history'], current_date)
     
     # Add assistant response to conversation history
     context.user_data['conversation_history'].append({
@@ -65,7 +70,7 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     # Send the response directly to the user
     update.message.reply_text(gpt_response)
 
-def call_yandex_gpt(messages) -> str:
+def call_yandex_gpt(messages, current_date=None) -> str:
     """Call Yandex GPT API and return the response."""
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
         return "Yandex API key or folder ID not configured. Please check your environment variables."
@@ -87,16 +92,20 @@ def call_yandex_gpt(messages) -> str:
 
 Задавай уточняющие вопросы по одному. Не делай предположений. Сначала запроси марку, пробег и госномер автомобиля. Только после получения этой информации спрашивай о замечаниях по состоянию автомобиля. После получения информации по каждому замечанию, обязательно спрашивай: "Есть ли ещё какие-то замечания по состоянию автомобиля?"
 
-Как только вся необходимая информация собрана, самостоятельно заверши диалог и выдай структурированный план работ в формате Markdown с заголовком "##План кузовных работ по автомобилю {вставь сюда госномер}##", на новой строке укажи "Владелец автомобиля: {имя владельца}", на новой строке укажи "Приемщик: Петя", на новой строке укажи "Дата приемки: {текущая дата в русском формате ЧЧММГГГГ, например, 03122025}" и перечисли в документе те работы, которые могут быть выполнены на сервисе.
+Как только вся необходимая информация собрана, самостоятельно заверши диалог и выдай структурированный план работ в формате Markdown с заголовком "##План кузовных работ по автомобилю {вставь сюда госномер}##", на новой строке укажи "Владелец автомобиля: {имя владельца}", на новой строке укажи "Приемщик: Петя", на новой строке укажи "Дата приемки: {current_date}" и перечисли в документе те работы, которые могут быть выполнены на сервисе.
 
 Не продолжай задавать вопросы, если данных достаточно. Если пользователь говорит «хватит» или «покажи план» — немедленно сформируй документ. Не используй фразы вроде «Уточните» — действуй самостоятельно при достаточном объёме данных.
 """
 
     # Prepare messages list with system prompt
+    formatted_system_prompt = system_prompt
+    if current_date:
+        formatted_system_prompt = system_prompt.replace("{current_date}", current_date)
+    
     formatted_messages = [
         {
             "role": "system",
-            "text": system_prompt
+            "text": formatted_system_prompt
         }
     ]
     
