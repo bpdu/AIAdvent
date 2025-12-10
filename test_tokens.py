@@ -19,8 +19,8 @@ load_dotenv(dotenv_path='.secrets/openrouter-api-key.env')
 
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-# Using DeepSeek R1 Distill Qwen 14B - less popular free model, more stable
-MODEL_NAME = 'deepseek/deepseek-r1-distill-qwen-14b:free'  # Free model
+# Using Mistral Small 3.1 - works! Already tested successfully
+MODEL_NAME = 'mistralai/mistral-small-3.1-24b-instruct:free'  # Free model
 
 
 def test_openrouter_api(prompt: str, description: str) -> dict:
