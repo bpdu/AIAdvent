@@ -1,12 +1,12 @@
 """
-Тестовый скрипт для демонстрации работы с токенами в OpenRouter API
+Тестовый скрипт для демонстрации работы с токенами в DeepSeek API
 
 Этот скрипт демонстрирует:
 1. Короткий запрос (минимальное использование токенов)
 2. Длинный запрос (среднее использование токенов)
 3. Очень длинный запрос (максимальное использование токенов, близкое к лимиту)
 
-Используется БЕСПЛАТНАЯ модель deepseek/deepseek-r1-distill-qwen-14b:free (14B параметров)
+Используется модель DeepSeek Chat (ваш оплаченный аккаунт)
 """
 
 import requests
@@ -15,22 +15,20 @@ from dotenv import load_dotenv
 import os
 
 # Load environment variables
-load_dotenv(dotenv_path='.secrets/openrouter-api-key.env')
+load_dotenv(dotenv_path='.secrets/deepseek-api-key.env')
 
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-# Using Mistral Small 3.1 - works! Already tested successfully
-MODEL_NAME = 'mistralai/mistral-small-3.1-24b-instruct:free'  # Free model
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
+# Using DeepSeek Chat - paid model with better reliability
+MODEL_NAME = 'deepseek-chat'  # Main DeepSeek model
 
 
-def test_openrouter_api(prompt: str, description: str) -> dict:
-    """Отправить запрос к OpenRouter API и вернуть статистику"""
+def test_deepseek_api(prompt: str, description: str) -> dict:
+    """Отправить запрос к DeepSeek API и вернуть статистику"""
 
     headers = {
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/your-username/telegram-bot',
-        'X-Title': 'Token Testing Script'
+        'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+        'Content-Type': 'application/json'
     }
 
     payload = {
@@ -53,7 +51,7 @@ def test_openrouter_api(prompt: str, description: str) -> dict:
     print(f"Примерно: {len(prompt) // 4} токенов (оценка)\n")
 
     try:
-        response = requests.post(OPENROUTER_API_URL, headers=headers, data=json.dumps(payload))
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, data=json.dumps(payload))
         response.raise_for_status()
         result = response.json()
 
@@ -102,13 +100,13 @@ def main():
     """Запустить тесты с разными размерами запросов"""
 
     print("\n" + "="*60)
-    print("🚀 ТЕСТИРОВАНИЕ РАБОТЫ С ТОКЕНАМИ OPENROUTER API")
-    print("   (БЕСПЛАТНАЯ МОДЕЛЬ DeepSeek R1 Distill Qwen - 14B)")
+    print("🚀 ТЕСТИРОВАНИЕ РАБОТЫ С ТОКЕНАМИ DEEPSEEK API")
+    print("   (DeepSeek Chat - Ваш оплаченный аккаунт)")
     print("="*60)
 
     # Тест 1: Короткий запрос
     short_prompt = "Привет! Как дела?"
-    test1 = test_openrouter_api(short_prompt, "ТЕСТ 1: Короткий запрос")
+    test1 = test_deepseek_api(short_prompt, "ТЕСТ 1: Короткий запрос")
 
     # Небольшая пауза между запросами
     import time
@@ -121,11 +119,11 @@ def main():
     и какие существуют лимиты на количество токенов в разных моделях.
     Приведи примеры того, как можно оптимизировать использование токенов.
     """
-    test2 = test_openrouter_api(medium_prompt, "ТЕСТ 2: Средний запрос")
+    test2 = test_deepseek_api(medium_prompt, "ТЕСТ 2: Средний запрос")
 
     time.sleep(1)
 
-    # Тест 3: Длинный запрос (но не экстремально длинный для бесплатной модели)
+    # Тест 3: Длинный запрос
     long_prompt = """
     Представь, что ты опытный преподаватель компьютерных наук.
 
@@ -146,7 +144,7 @@ def main():
     Также приведи практические рекомендации для разработчиков, работающих с языковыми моделями.
     """
 
-    test3 = test_openrouter_api(long_prompt, "ТЕСТ 3: Длинный запрос")
+    test3 = test_deepseek_api(long_prompt, "ТЕСТ 3: Длинный запрос")
 
     # Итоговая статистика
     print("\n" + "="*60)
@@ -178,18 +176,19 @@ def main():
     1. Короткие запросы используют минимум токенов (обычно 10-50)
     2. Средние запросы используют умеренное количество (100-500)
     3. Длинные запросы могут использовать 500-2000+ токенов
-    4. Бесплатная модель DeepSeek R1 Distill Qwen через OpenRouter отлично работает!
-    5. Важно мониторить использование токенов для понимания работы модели
-    6. OpenRouter предоставляет точную статистику по токенам в каждом ответе
+    4. DeepSeek Chat - ОЧЕНЬ дешёвая модель ($0.14/$0.28 за 1M токенов)
+    5. Для теста с ~3000 токенов стоимость всего ~$0.0007 (меньше копейки!)
+    6. Важно мониторить использование токенов для понимания работы модели
+    7. DeepSeek API предоставляет точную статистику по токенам в каждом ответе
     """)
     print("="*60 + "\n")
 
 
 if __name__ == "__main__":
-    if not OPENROUTER_API_KEY:
-        print("❌ Ошибка: Не настроена переменная окружения OPENROUTER_API_KEY")
-        print("   Создайте файл .secrets/openrouter-api-key.env со следующим содержимым:")
-        print("   OPENROUTER_API_KEY=your_api_key_here")
-        print("\n   Получить бесплатный API ключ можно на https://openrouter.ai/")
+    if not DEEPSEEK_API_KEY:
+        print("❌ Ошибка: Не настроена переменная окружения DEEPSEEK_API_KEY")
+        print("   Создайте файл .secrets/deepseek-api-key.env со следующим содержимым:")
+        print("   DEEPSEEK_API_KEY=your_api_key_here")
+        print("\n   Получить API ключ можно на https://platform.deepseek.com/")
     else:
         main()

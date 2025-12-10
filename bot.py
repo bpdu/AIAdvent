@@ -8,7 +8,7 @@ import os
 
 # Load environment variables from the secret files
 load_dotenv(dotenv_path='.secrets/bot-token.env')
-load_dotenv(dotenv_path='.secrets/openrouter-api-key.env')
+load_dotenv(dotenv_path='.secrets/deepseek-api-key.env')
 
 # Enable logging
 logging.basicConfig(
@@ -21,16 +21,16 @@ logger = logging.getLogger(__name__)
 # Get the bot token from environment variables
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# OpenRouter API configuration (using free model)
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-# Using Mistral Small 3.1 - works! Already tested successfully
-MODEL_NAME = 'mistralai/mistral-small-3.1-24b-instruct:free'  # Free model from OpenRouter
+# DeepSeek API configuration (using your paid account)
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
+# Using DeepSeek Chat - your paid model
+MODEL_NAME = 'deepseek-chat'  # Main DeepSeek model
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    update.message.reply_text('Привет! Это бот с бесплатной моделью Mistral Small 3.1 (24B параметров) через OpenRouter. Задавай любые вопросы!')
+    update.message.reply_text('Привет! Это бот с моделью DeepSeek Chat через DeepSeek API. Задавай любые вопросы!')
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
@@ -40,7 +40,7 @@ def help_command(update: Update, context: CallbackContext) -> None:
         '/help - Показать это сообщение\n'
         '/stats - Показать статистику использования токенов\n'
         '/clear - Очистить историю разговора\n\n'
-        'Просто отправьте мне вопрос, и я отвечу с помощью бесплатной модели Mistral Small 3.1!'
+        'Просто отправьте мне вопрос, и я отвечу с помощью модели DeepSeek Chat!'
     )
     update.message.reply_text(help_text)
 
@@ -133,8 +133,8 @@ def ask_question(update: Update, context: CallbackContext) -> None:
             "Модель может не обработать весь контекст."
         )
 
-    # Call OpenRouter API with conversation history
-    gpt_response, token_usage = call_openrouter_api(context.user_data['conversation_history'])
+    # Call DeepSeek API with conversation history
+    gpt_response, token_usage = call_deepseek_api(context.user_data['conversation_history'])
 
     # Add assistant response to conversation history
     context.user_data['conversation_history'].append({
@@ -149,6 +149,7 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     context.user_data['token_stats']['total_completion_tokens'] += token_usage['completion_tokens']
 
     # Add to request history (keep last 20 requests)
+    from datetime import datetime
     context.user_data['token_stats']['requests_history'].append({
         'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'question_length': len(user_question),
@@ -170,8 +171,8 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     full_response = gpt_response + token_info
     update.message.reply_text(full_response)
 
-def call_openrouter_api(messages) -> tuple:
-    """Call OpenRouter API and return the response with token usage.
+def call_deepseek_api(messages) -> tuple:
+    """Call DeepSeek API and return the response with token usage.
 
     Returns:
         tuple: (response_text, token_usage_dict) where token_usage_dict contains:
@@ -179,15 +180,13 @@ def call_openrouter_api(messages) -> tuple:
             - prompt_tokens: tokens in the prompt
             - completion_tokens: tokens in the completion
     """
-    if not OPENROUTER_API_KEY:
-        return ("OpenRouter API key not configured. Please check your environment variables.",
+    if not DEEPSEEK_API_KEY:
+        return ("DeepSeek API key not configured. Please check your environment variables.",
                 {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0})
 
     headers = {
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/your-username/telegram-bot',  # Optional
-        'X-Title': 'Telegram AI Bot'  # Optional
+        'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+        'Content-Type': 'application/json'
     }
 
     # Add system message if not present
@@ -209,7 +208,7 @@ def call_openrouter_api(messages) -> tuple:
     }
 
     try:
-        response = requests.post(OPENROUTER_API_URL, headers=headers, data=json.dumps(payload))
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, data=json.dumps(payload))
         response.raise_for_status()
         result = response.json()
 
@@ -234,7 +233,7 @@ def call_openrouter_api(messages) -> tuple:
 
         return (response_text, token_usage)
     except Exception as e:
-        logger.error(f"Error calling OpenRouter API: {e}")
+        logger.error(f"Error calling DeepSeek API: {e}")
         if hasattr(e, 'response') and e.response is not None:
             logger.error(f"Response status: {e.response.status_code}")
             logger.error(f"Response body: {e.response.text}")
