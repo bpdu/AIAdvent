@@ -24,13 +24,13 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 # OpenRouter API configuration (using free model)
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-# Using Mistral Small 3.1 - free model with 24B parameters
-MODEL_NAME = 'mistralai/mistral-small-3.1-24b-instruct:free'  # Free model from OpenRouter
+# Using Llama 3.2 3B - free model from Meta
+MODEL_NAME = 'meta-llama/llama-3.2-3b-instruct:free'  # Free model from OpenRouter
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    update.message.reply_text('Привет! Это бот с бесплатной моделью Mistral Small 3.1 (24B параметров) через OpenRouter. Задавай любые вопросы!')
+    update.message.reply_text('Привет! Это бот с бесплатной моделью Llama 3.2 (3B параметров) от Meta через OpenRouter. Задавай любые вопросы!')
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
@@ -40,7 +40,7 @@ def help_command(update: Update, context: CallbackContext) -> None:
         '/help - Показать это сообщение\n'
         '/stats - Показать статистику использования токенов\n'
         '/clear - Очистить историю разговора\n\n'
-        'Просто отправьте мне вопрос, и я отвечу с помощью бесплатной модели Mistral Small 3.1!'
+        'Просто отправьте мне вопрос, и я отвечу с помощью бесплатной модели Llama 3.2!'
     )
     update.message.reply_text(help_text)
 
