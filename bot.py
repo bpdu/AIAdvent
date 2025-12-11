@@ -38,8 +38,10 @@ def help_command(update: Update, context: CallbackContext) -> None:
         'Доступные команды:\n'
         '/start - Начать работу с ботом\n'
         '/help - Показать это сообщение\n'
-        '/stats - Показать статистику использования токенов\n'
+        '/stats - Показать статистику использования токенов и сжатия\n'
+        '/compress - Сжать историю разговора вручную\n'
         '/clear - Очистить историю разговора\n\n'
+        '💡 Автосжатие: Каждые 10 сообщений история автоматически сжимается для экономии токенов!\n\n'
         'Просто отправьте мне вопрос, и я отвечу с помощью модели DeepSeek Chat!'
     )
     update.message.reply_text(help_text)
@@ -71,6 +73,15 @@ def stats_command(update: Update, context: CallbackContext) -> None:
         f"• Ответ: {avg_completion:.1f} токенов\n"
     )
 
+    # Show compression statistics
+    if 'compression_stats' in context.user_data and context.user_data['compression_stats']['total_compressions'] > 0:
+        comp_stats = context.user_data['compression_stats']
+        stats_text += f"\n{'=' * 35}\n"
+        stats_text += "🗜️ Статистика сжатия:\n\n"
+        stats_text += f"• Всего сжатий: {comp_stats['total_compressions']}\n"
+        stats_text += f"• Сообщений сжато: {comp_stats['messages_compressed']}\n"
+        stats_text += f"• Токенов сэкономлено: ~{comp_stats['tokens_saved']}\n"
+
     # Show last 5 requests
     if stats['requests_history']:
         stats_text += f"\n{'=' * 35}\n"
@@ -92,6 +103,44 @@ def clear_command(update: Update, context: CallbackContext) -> None:
     if 'conversation_history' in context.user_data:
         context.user_data['conversation_history'] = []
     update.message.reply_text('🗑️ История разговора очищена!')
+
+def compress_command(update: Update, context: CallbackContext) -> None:
+    """Manually compress conversation history."""
+    if 'conversation_history' not in context.user_data:
+        update.message.reply_text('❌ История разговора пуста!')
+        return
+
+    history = context.user_data['conversation_history']
+    non_system_messages = [msg for msg in history if msg.get('role') != 'system']
+
+    if len(non_system_messages) < 2:
+        update.message.reply_text('❌ Недостаточно сообщений для сжатия (минимум 2)')
+        return
+
+    update.message.reply_text('🗜️ Сжимаю историю разговора...')
+
+    compression_result = compress_conversation_history(context, force=True)
+
+    if compression_result.get('compressed'):
+        # Reset message counter after manual compression
+        old_counter = context.user_data.get('message_counter', 0)
+        context.user_data['message_counter'] = 0
+
+        response = (
+            f"✅ История успешно сжата!\n\n"
+            f"📊 Статистика сжатия:\n"
+            f"• Сообщений до: {compression_result['messages_before']}\n"
+            f"• Сообщений после: {compression_result['messages_after']}\n"
+            f"• Токенов до: ~{compression_result['tokens_before']}\n"
+            f"• Токенов после: ~{compression_result['tokens_after']}\n"
+            f"• Сэкономлено токенов: ~{compression_result['tokens_saved']}\n"
+            f"• Коэффициент сжатия: {compression_result['compression_ratio']}%\n"
+            f"• Экономия: {100 - compression_result['compression_ratio']:.0f}%\n\n"
+            f"🔄 Счётчик сообщений сброшен (было: #{old_counter})"
+        )
+        update.message.reply_text(response)
+    else:
+        update.message.reply_text(f"❌ Не удалось сжать историю: {compression_result.get('reason', 'Неизвестная ошибка')}")
 
 def ask_question(update: Update, context: CallbackContext) -> None:
     """Send the user's question to OpenRouter API and return the response."""
@@ -115,11 +164,35 @@ def ask_question(update: Update, context: CallbackContext) -> None:
             'requests_history': []
         }
 
+    # Initialize message counter
+    if 'message_counter' not in context.user_data:
+        context.user_data['message_counter'] = 0
+
+    # Increment message counter
+    context.user_data['message_counter'] += 1
+    current_message_num = context.user_data['message_counter']
+
     # Add user message to conversation history
     context.user_data['conversation_history'].append({
         "role": "user",
         "content": user_question
     })
+
+    # Auto-compress every 10 messages (excluding system messages)
+    non_system_messages = [msg for msg in context.user_data['conversation_history'] if msg.get('role') != 'system']
+    if len(non_system_messages) >= 10:
+        compression_result = compress_conversation_history(context)
+        if compression_result.get('compressed'):
+            # Reset message counter after compression
+            context.user_data['message_counter'] = 0
+            update.message.reply_text(
+                f"🗜️ Автосжатие истории (после сообщения #{current_message_num}):\n"
+                f"• Сжато сообщений: {compression_result['messages_before']}\n"
+                f"• Токенов было: ~{compression_result['tokens_before']}\n"
+                f"• Токенов стало: ~{compression_result['tokens_after']}\n"
+                f"• Экономия: ~{compression_result['tokens_saved']} токенов ({100 - compression_result['compression_ratio']:.0f}%)\n"
+                f"• Счётчик сообщений сброшен!"
+            )
 
     # Estimate input length for warning
     estimated_input_chars = sum(len(msg['content']) for msg in context.user_data['conversation_history'])
@@ -161,7 +234,7 @@ def ask_question(update: Update, context: CallbackContext) -> None:
 
     # Format response with token information
     token_info = (
-        f"\n\n📊 Использовано токенов:\n"
+        f"\n\n📊 Сообщение #{current_message_num} | Использовано токенов:\n"
         f"• Запрос: {token_usage['prompt_tokens']}\n"
         f"• Ответ: {token_usage['completion_tokens']}\n"
         f"• Всего: {token_usage['total_tokens']}"
@@ -170,6 +243,112 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     # Send the response directly to the user with token info
     full_response = gpt_response + token_info
     update.message.reply_text(full_response)
+
+def create_conversation_summary(messages) -> str:
+    """Create a summary of conversation history using DeepSeek API.
+
+    Args:
+        messages: List of conversation messages
+
+    Returns:
+        str: Summary of the conversation
+    """
+    if not messages:
+        return ""
+
+    # Prepare prompt for summarization
+    conversation_text = "\n".join([
+        f"{msg['role'].upper()}: {msg['content']}"
+        for msg in messages
+    ])
+
+    summary_prompt = f"""Создай краткое резюме следующего диалога.
+Сохрани ВСЮ важную информацию, факты, контекст и выводы.
+Резюме должно позволить продолжить разговор без потери контекста.
+
+Диалог:
+{conversation_text}
+
+Краткое резюме (на русском):"""
+
+    summary_messages = [
+        {"role": "system", "content": "Ты помощник, который создаёт краткие резюме диалогов, сохраняя всю важную информацию."},
+        {"role": "user", "content": summary_prompt}
+    ]
+
+    try:
+        response_text, _ = call_deepseek_api(summary_messages)
+        return response_text
+    except Exception as e:
+        logger.error(f"Error creating summary: {e}")
+        # Fallback: create simple summary
+        return f"Обсуждалось {len(messages)} сообщений. Темы: {', '.join(set([msg['content'][:30] + '...' for msg in messages[:3]]))}"
+
+def compress_conversation_history(context: CallbackContext, force: bool = False) -> dict:
+    """Compress conversation history by creating a summary.
+
+    Args:
+        context: Telegram context with user_data
+        force: Force compression even if threshold not reached
+
+    Returns:
+        dict: Compression statistics
+    """
+    if 'conversation_history' not in context.user_data:
+        return {'compressed': False, 'reason': 'No history'}
+
+    history = context.user_data['conversation_history']
+
+    # Skip if history is too short (unless forced)
+    if len(history) < 10 and not force:
+        return {'compressed': False, 'reason': 'History too short', 'messages': len(history)}
+
+    # Calculate tokens before compression
+    chars_before = sum(len(msg['content']) for msg in history)
+    tokens_before = chars_before // 4
+
+    # Create summary of all messages except system messages
+    messages_to_summarize = [msg for msg in history if msg.get('role') != 'system']
+
+    if not messages_to_summarize:
+        return {'compressed': False, 'reason': 'No messages to compress'}
+
+    logger.info(f"Compressing {len(messages_to_summarize)} messages...")
+    summary = create_conversation_summary(messages_to_summarize)
+
+    # Replace history with summary
+    context.user_data['conversation_history'] = [
+        {
+            "role": "system",
+            "content": f"Предыдущий контекст диалога (резюме {len(messages_to_summarize)} сообщений):\n{summary}"
+        }
+    ]
+
+    # Calculate tokens after compression
+    chars_after = len(summary)
+    tokens_after = chars_after // 4
+
+    # Update compression statistics
+    if 'compression_stats' not in context.user_data:
+        context.user_data['compression_stats'] = {
+            'total_compressions': 0,
+            'tokens_saved': 0,
+            'messages_compressed': 0
+        }
+
+    context.user_data['compression_stats']['total_compressions'] += 1
+    context.user_data['compression_stats']['tokens_saved'] += (tokens_before - tokens_after)
+    context.user_data['compression_stats']['messages_compressed'] += len(messages_to_summarize)
+
+    return {
+        'compressed': True,
+        'messages_before': len(messages_to_summarize),
+        'messages_after': 1,
+        'tokens_before': tokens_before,
+        'tokens_after': tokens_after,
+        'tokens_saved': tokens_before - tokens_after,
+        'compression_ratio': round(tokens_after / tokens_before * 100, 1) if tokens_before > 0 else 0
+    }
 
 def call_deepseek_api(messages) -> tuple:
     """Call DeepSeek API and return the response with token usage.
@@ -260,6 +439,7 @@ def main() -> None:
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("stats", stats_command))
+    dispatcher.add_handler(CommandHandler("compress", compress_command))
     dispatcher.add_handler(CommandHandler("clear", clear_command))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, ask_question))
     
