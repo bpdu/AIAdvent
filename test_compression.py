@@ -1,11 +1,12 @@
 """
-Тестовый скрипт для демонстрации сжатия диалога (День 9 - AI Advent Challenge)
+Тестовый скрипт для демонстрации внешней памяти (День 10 - AI Advent Challenge)
 
 Этот скрипт демонстрирует:
 1. Разговор с 12 сообщениями (6 вопросов + 6 ответов)
-2. Автоматическое сжатие после 10 сообщений
-3. Сравнение токенов ДО и ПОСЛЕ сжатия
-4. Качество ответов с использованием summary
+2. Автоматическое сжатие после 6 сообщений
+3. Сохранение контекста в JSON-файл после сжатия
+4. Загрузку контекста из JSON при следующем запуске
+5. Долговременную память между запусками
 
 Используется модель DeepSeek Chat
 """
@@ -15,6 +16,7 @@ import json
 from dotenv import load_dotenv
 import os
 import time
+from datetime import datetime
 
 # Load environment variables
 load_dotenv(dotenv_path='.secrets/deepseek-api-key.env')
@@ -86,10 +88,96 @@ def calculate_tokens(messages):
     chars = sum(len(msg['content']) for msg in messages)
     return chars // 4  # Rough estimate
 
+def save_context_to_json(conversation_history, filename=None):
+    """Save conversation context to JSON file"""
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"context_{timestamp}.json"
+
+    # Create memory directory if it doesn't exist
+    memory_dir = "memory"
+    if not os.path.exists(memory_dir):
+        os.makedirs(memory_dir)
+
+    filepath = os.path.join(memory_dir, filename)
+
+    context_data = {
+        "timestamp": datetime.now().isoformat(),
+        "messages_count": len(conversation_history),
+        "conversation_history": conversation_history
+    }
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(context_data, f, ensure_ascii=False, indent=2)
+
+    return filepath
+
+def load_context_from_json(filepath):
+    """Load conversation context from JSON file"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            context_data = json.load(f)
+
+        return context_data.get('conversation_history', [])
+    except FileNotFoundError:
+        print(f"❌ Файл {filepath} не найден")
+        return None
+    except json.JSONDecodeError:
+        print(f"❌ Ошибка чтения JSON из файла {filepath}")
+        return None
+
+def list_saved_contexts():
+    """List all saved context files"""
+    memory_dir = "memory"
+    if not os.path.exists(memory_dir):
+        return []
+
+    files = [f for f in os.listdir(memory_dir) if f.endswith('.json')]
+    files.sort(reverse=True)  # Most recent first
+    return files
+
 def main():
     print("\n" + "="*70)
-    print("🗜️  ДЕМОНСТРАЦИЯ СЖАТИЯ ДИАЛОГА (День 9 - AI Advent Challenge)")
+    print("💾  ДЕМОНСТРАЦИЯ ВНЕШНЕЙ ПАМЯТИ (День 10 - AI Advent Challenge)")
     print("="*70)
+
+    # Проверяем наличие сохраненных контекстов
+    saved_contexts = list_saved_contexts()
+    conversation_history = []
+
+    if saved_contexts:
+        print(f"\n📂 Найдено сохраненных контекстов: {len(saved_contexts)}")
+        print("\nПоследние файлы:")
+        for i, filename in enumerate(saved_contexts[:5], 1):
+            print(f"   {i}. {filename}")
+
+        print("\n❓ Хотите загрузить контекст из файла?")
+        print("   Введите номер файла (1-5) или нажмите Enter для нового диалога")
+
+        choice = input("Ваш выбор: ").strip()
+
+        if choice.isdigit() and 1 <= int(choice) <= min(5, len(saved_contexts)):
+            selected_file = saved_contexts[int(choice) - 1]
+            filepath = os.path.join("memory", selected_file)
+
+            loaded_context = load_context_from_json(filepath)
+
+            if loaded_context:
+                conversation_history = loaded_context
+                print(f"\n✅ Контекст загружен из {selected_file}")
+                print(f"   Загружено сообщений: {len(conversation_history)}")
+
+                # Показываем краткое резюме загруженного контекста
+                if conversation_history and conversation_history[0].get('role') == 'system':
+                    summary_preview = conversation_history[0]['content'][:150]
+                    print(f"\n📝 Краткое содержание контекста:")
+                    print(f"   {summary_preview}...")
+            else:
+                print("\n⚠️  Не удалось загрузить контекст, начинаем новый диалог")
+        else:
+            print("\n▶️  Начинаем новый диалог")
+    else:
+        print("\n▶️  Сохраненных контекстов не найдено. Начинаем новый диалог")
 
     # Диалог для теста
     test_questions = [
@@ -104,9 +192,12 @@ def main():
         "А что ты говорил про токены?",
     ]
 
-    conversation_history = []
     total_tokens_without_compression = 0
     total_tokens_with_compression = 0
+
+    # Если контекст не был загружен, начинаем с пустой истории
+    if not conversation_history:
+        conversation_history = []
 
     print("\n" + "="*70)
     print("📊 ФАЗА 1: Диалог БЕЗ сжатия (первые 6 вопросов)")
@@ -168,6 +259,11 @@ def main():
     print(f"   • Сэкономлено: ~{tokens_before - tokens_after} токенов")
     print(f"   • Экономия: {100 - (tokens_after / tokens_before * 100):.0f}%")
 
+    # Сохраняем контекст в JSON
+    print(f"\n💾 Сохраняю контекст в JSON...")
+    saved_filepath = save_context_to_json(conversation_history)
+    print(f"✅ Контекст сохранён в файл: {saved_filepath}")
+
     # Фаза 3: Продолжаем диалог с summary
     print("\n" + "="*70)
     print("📊 ФАЗА 3: Продолжение диалога С summary (проверка контекста)")
@@ -209,12 +305,17 @@ def main():
                    total_tokens_without_compression * 100)
         print(f"   • Экономия: ~{savings:.0f}% токенов!")
 
-    print(f"\n✅ ВЫВОДЫ:")
+    print(f"\n✅ ВЫВОДЫ (День 10 - Внешняя память):")
     print(f"   1. Сжатие позволяет существенно снизить расход токенов")
     print(f"   2. Контекст диалога сохраняется благодаря качественному summary")
     print(f"   3. Модель может отвечать на вопросы о прошлом диалоге")
-    print(f"   4. Это особенно полезно для длинных разговоров")
-    print(f"   5. DeepSeek Chat отлично справляется с созданием резюме!")
+    print(f"   4. Контекст автоматически сохраняется в JSON после сжатия")
+    print(f"   5. При следующем запуске можно загрузить сохраненный контекст")
+    print(f"   6. Это обеспечивает долговременную память между сеансами!")
+    print(f"   7. DeepSeek Chat отлично справляется с созданием резюме!")
+
+    print(f"\n💾 Файл с контекстом: {saved_filepath}")
+    print(f"   При следующем запуске вы сможете загрузить этот контекст!")
 
     print("\n" + "="*70 + "\n")
 
