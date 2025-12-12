@@ -2,13 +2,16 @@
 Тестовый скрипт для демонстрации внешней памяти (День 10 - AI Advent Challenge)
 
 Этот скрипт демонстрирует:
-1. Разговор с 12 сообщениями (6 вопросов + 6 ответов)
-2. Автоматическое сжатие после 6 сообщений
+1. Интерактивный диалог с пользователем
+2. Автоматическое сжатие после каждых 6 сообщений
 3. Сохранение контекста в JSON-файл после сжатия
 4. Загрузку контекста из JSON при следующем запуске
 5. Долговременную память между запусками
 
 Используется модель DeepSeek Chat
+
+Запуск: python test_compression.py
+Команды выхода: exit, quit, выход, или пустая строка
 """
 
 import requests
@@ -16,6 +19,7 @@ import json
 from dotenv import load_dotenv
 import os
 import time
+import re
 from datetime import datetime
 
 # Load environment variables
@@ -24,6 +28,17 @@ load_dotenv(dotenv_path='.secrets/deepseek-api-key.env')
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 MODEL_NAME = 'deepseek-chat'
+
+def clean_user_input(text):
+    """Remove control characters and ANSI escape sequences from user input"""
+    # Remove ANSI escape sequences (like ^[[D from arrow keys)
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    text = ansi_escape.sub('', text)
+
+    # Remove other control characters except newlines and tabs
+    text = ''.join(char for char in text if char.isprintable() or char in '\n\t')
+
+    return text.strip()
 
 def call_deepseek_api(messages) -> tuple:
     """Call DeepSeek API and return response with token usage"""
@@ -40,7 +55,7 @@ def call_deepseek_api(messages) -> tuple:
     }
 
     try:
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, data=json.dumps(payload))
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, data=json.dumps(payload), timeout=30)
         response.raise_for_status()
         result = response.json()
 
@@ -55,12 +70,29 @@ def call_deepseek_api(messages) -> tuple:
                 'completion_tokens': usage.get('completion_tokens', 0)
             }
         )
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"HTTP Error {response.status_code}"
+        try:
+            error_detail = response.json()
+            if 'error' in error_detail:
+                error_msg += f": {error_detail['error'].get('message', str(e))}"
+        except:
+            error_msg += f": {str(e)}"
+        print(f"❌ {error_msg}")
+        return (f"Ошибка API: {error_msg}", {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0})
+    except requests.exceptions.Timeout:
+        print(f"❌ Превышено время ожидания ответа от API (30 сек)")
+        return ("Ошибка: превышено время ожидания", {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0})
     except Exception as e:
-        print(f"❌ Error: {e}")
-        return (f"Error: {str(e)}", {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0})
+        print(f"❌ Неожиданная ошибка: {type(e).__name__}: {e}")
+        return (f"Ошибка: {str(e)}", {'total_tokens': 0, 'prompt_tokens': 0, 'completion_tokens': 0})
 
-def create_conversation_summary(messages) -> str:
-    """Create a summary of conversation history"""
+def create_conversation_summary(messages) -> tuple:
+    """Create a summary of conversation history
+
+    Returns:
+        tuple: (summary_text, success) where success is True if summary was created successfully
+    """
     conversation_text = "\n".join([
         f"{msg['role'].upper()}: {msg['content']}"
         for msg in messages if msg.get('role') != 'system'
@@ -80,8 +112,13 @@ def create_conversation_summary(messages) -> str:
         {"role": "user", "content": summary_prompt}
     ]
 
-    response_text, _ = call_deepseek_api(summary_messages)
-    return response_text
+    response_text, token_usage = call_deepseek_api(summary_messages)
+
+    # Проверяем, что summary создан успешно
+    if token_usage['total_tokens'] == 0 or response_text.startswith('Ошибка'):
+        return None, False
+
+    return response_text, True
 
 def calculate_tokens(messages):
     """Estimate tokens in messages"""
@@ -198,10 +235,13 @@ def main():
     while True:
         # Получаем вопрос от пользователя
         try:
-            user_input = input(f"\n🙋 Вы (сообщение #{message_count + 1}): ").strip()
+            user_input = input(f"\n🙋 Вы (сообщение #{message_count + 1}): ")
         except (EOFError, KeyboardInterrupt):
             print("\n\n👋 Выход из диалога...")
             break
+
+        # Очищаем ввод от управляющих символов
+        user_input = clean_user_input(user_input)
 
         # Проверка на выход
         if not user_input or user_input.lower() in ['exit', 'quit', 'выход']:
@@ -214,6 +254,14 @@ def main():
 
         # Получаем ответ от API
         response, token_usage = call_deepseek_api(conversation_history)
+
+        # Проверяем на ошибку
+        if token_usage['total_tokens'] == 0:
+            # Произошла ошибка, удаляем последний вопрос из истории
+            conversation_history.pop()
+            message_count -= 1
+            print("⚠️  Попробуйте переформулировать вопрос или введите другой вопрос.")
+            continue
 
         # Добавляем ответ в историю
         conversation_history.append({"role": "assistant", "content": response})
@@ -239,35 +287,39 @@ def main():
             messages_to_summarize = conversation_history.copy()
             tokens_before = calculate_tokens(messages_to_summarize)
 
-            summary = create_conversation_summary(messages_to_summarize)
+            summary, success = create_conversation_summary(messages_to_summarize)
 
-            print(f"\n📝 Summary создан (краткое содержание):")
-            print(f"   {summary[:200]}...")
+            if not success or summary is None:
+                print(f"\n⚠️  Не удалось создать summary. Пропускаем сжатие.")
+                print(f"   Диалог продолжится без сжатия истории.")
+            else:
+                print(f"\n📝 Summary создан (краткое содержание):")
+                print(f"   {summary[:200]}...")
 
-            # Replace history with summary
-            conversation_history = [
-                {
-                    "role": "system",
-                    "content": f"Предыдущий контекст диалога (резюме {len(messages_to_summarize)} сообщений):\n{summary}"
-                }
-            ]
+                # Replace history with summary
+                conversation_history = [
+                    {
+                        "role": "system",
+                        "content": f"Предыдущий контекст диалога (резюме {len(messages_to_summarize)} сообщений):\n{summary}"
+                    }
+                ]
 
-            tokens_after = calculate_tokens(conversation_history)
+                tokens_after = calculate_tokens(conversation_history)
 
-            print(f"\n📊 Результаты сжатия:")
-            print(f"   • Сообщений до: {len(messages_to_summarize)}")
-            print(f"   • Сообщений после: {len(conversation_history)}")
-            print(f"   • Токенов до: ~{tokens_before}")
-            print(f"   • Токенов после: ~{tokens_after}")
-            print(f"   • Сэкономлено: ~{tokens_before - tokens_after} токенов")
-            print(f"   • Экономия: {100 - (tokens_after / tokens_before * 100):.0f}%")
+                print(f"\n📊 Результаты сжатия:")
+                print(f"   • Сообщений до: {len(messages_to_summarize)}")
+                print(f"   • Сообщений после: {len(conversation_history)}")
+                print(f"   • Токенов до: ~{tokens_before}")
+                print(f"   • Токенов после: ~{tokens_after}")
+                print(f"   • Сэкономлено: ~{tokens_before - tokens_after} токенов")
+                print(f"   • Экономия: {100 - (tokens_after / tokens_before * 100):.0f}%")
 
-            # Сохраняем контекст в JSON
-            print(f"\n💾 Сохраняю контекст в JSON...")
-            saved_filepath = save_context_to_json(conversation_history)
-            print(f"✅ Контекст сохранён в файл: {saved_filepath}")
+                # Сохраняем контекст в JSON
+                print(f"\n💾 Сохраняю контекст в JSON...")
+                saved_filepath = save_context_to_json(conversation_history)
+                print(f"✅ Контекст сохранён в файл: {saved_filepath}")
 
-            print("\n💬 Можете продолжить диалог. Контекст сохранён!\n")
+                print("\n💬 Можете продолжить диалог. Контекст сохранён!\n")
 
         time.sleep(0.3)  # Small delay between requests
 
