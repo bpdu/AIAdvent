@@ -179,143 +179,125 @@ def main():
     else:
         print("\n▶️  Сохраненных контекстов не найдено. Начинаем новый диалог")
 
-    # Диалог для теста
-    test_questions = [
-        "Привет! Расскажи кратко о себе.",
-        "Что такое искусственный интеллект?",
-        "Как работают нейронные сети?",
-        "Что такое токены в языковых моделях?",
-        "Почему важно оптимизировать использование токенов?",
-        "Как можно сжать историю диалога?",
-        # После сжатия - проверяем сохранность контекста
-        "Вернёмся к началу: помнишь, о чём мы говорили в самом первом сообщении?",
-        "А что ты говорил про токены?",
-    ]
-
-    total_tokens_without_compression = 0
-    total_tokens_with_compression = 0
+    total_tokens_used = 0
+    message_count = 0
+    COMPRESSION_THRESHOLD = 6  # Сжимать после каждых 6 сообщений (пар вопрос-ответ)
 
     # Если контекст не был загружен, начинаем с пустой истории
     if not conversation_history:
         conversation_history = []
 
     print("\n" + "="*70)
-    print("📊 ФАЗА 1: Диалог БЕЗ сжатия (первые 6 вопросов)")
+    print("💬 ИНТЕРАКТИВНЫЙ ДИАЛОГ")
     print("="*70)
+    print("\nВведите ваши вопросы. Для выхода введите 'exit', 'quit' или пустую строку.")
+    print(f"💡 Каждые {COMPRESSION_THRESHOLD} сообщений история будет автоматически сжиматься.\n")
 
-    # Фаза 1: Без сжатия
-    for i, question in enumerate(test_questions[:6], 1):
-        print(f"\n🙋 Сообщение #{i}: {question}")
+    saved_filepath = None
 
-        conversation_history.append({"role": "user", "content": question})
+    while True:
+        # Получаем вопрос от пользователя
+        try:
+            user_input = input(f"\n🙋 Вы (сообщение #{message_count + 1}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n👋 Выход из диалога...")
+            break
 
+        # Проверка на выход
+        if not user_input or user_input.lower() in ['exit', 'quit', 'выход']:
+            print("\n👋 Завершение диалога...")
+            break
+
+        # Добавляем вопрос пользователя
+        conversation_history.append({"role": "user", "content": user_input})
+        message_count += 1
+
+        # Получаем ответ от API
         response, token_usage = call_deepseek_api(conversation_history)
 
+        # Добавляем ответ в историю
         conversation_history.append({"role": "assistant", "content": response})
 
-        total_tokens_without_compression += token_usage['total_tokens']
+        total_tokens_used += token_usage['total_tokens']
 
-        print(f"🤖 Ответ: {response[:100]}...")
+        # Выводим ответ
+        print(f"\n🤖 Ассистент: {response}")
         print(f"📊 Токены: {token_usage['total_tokens']} (запрос: {token_usage['prompt_tokens']}, ответ: {token_usage['completion_tokens']})")
+        print(f"📈 Всего использовано токенов: {total_tokens_used}")
 
-        time.sleep(0.5)  # Small delay between requests
+        # Проверяем, нужно ли сжать историю
+        # Считаем только пары user-assistant (не system сообщения)
+        user_messages = [msg for msg in conversation_history if msg['role'] == 'user']
 
-    print(f"\n{'='*70}")
-    print(f"📊 ИТОГО фаза 1 (БЕЗ сжатия): {total_tokens_without_compression} токенов")
-    print(f"   Сообщений в истории: {len(conversation_history)}")
-    print(f"   Примерно токенов в истории: ~{calculate_tokens(conversation_history)}")
-    print(f"{'='*70}")
+        if len(user_messages) >= COMPRESSION_THRESHOLD and len(user_messages) % COMPRESSION_THRESHOLD == 0:
+            print("\n" + "="*70)
+            print("🗜️  АВТОМАТИЧЕСКОЕ СЖАТИЕ ИСТОРИИ")
+            print("="*70)
 
-    # Фаза 2: Создаём summary
+            print(f"\n🔄 Достигнут порог в {COMPRESSION_THRESHOLD} сообщений. Создаю summary диалога...")
+
+            messages_to_summarize = conversation_history.copy()
+            tokens_before = calculate_tokens(messages_to_summarize)
+
+            summary = create_conversation_summary(messages_to_summarize)
+
+            print(f"\n📝 Summary создан (краткое содержание):")
+            print(f"   {summary[:200]}...")
+
+            # Replace history with summary
+            conversation_history = [
+                {
+                    "role": "system",
+                    "content": f"Предыдущий контекст диалога (резюме {len(messages_to_summarize)} сообщений):\n{summary}"
+                }
+            ]
+
+            tokens_after = calculate_tokens(conversation_history)
+
+            print(f"\n📊 Результаты сжатия:")
+            print(f"   • Сообщений до: {len(messages_to_summarize)}")
+            print(f"   • Сообщений после: {len(conversation_history)}")
+            print(f"   • Токенов до: ~{tokens_before}")
+            print(f"   • Токенов после: ~{tokens_after}")
+            print(f"   • Сэкономлено: ~{tokens_before - tokens_after} токенов")
+            print(f"   • Экономия: {100 - (tokens_after / tokens_before * 100):.0f}%")
+
+            # Сохраняем контекст в JSON
+            print(f"\n💾 Сохраняю контекст в JSON...")
+            saved_filepath = save_context_to_json(conversation_history)
+            print(f"✅ Контекст сохранён в файл: {saved_filepath}")
+
+            print("\n💬 Можете продолжить диалог. Контекст сохранён!\n")
+
+        time.sleep(0.3)  # Small delay between requests
+
+    # Итоговая статистика
     print("\n" + "="*70)
-    print("🗜️  ФАЗА 2: СЖАТИЕ ИСТОРИИ")
+    print("🎯 ИТОГОВАЯ СТАТИСТИКА")
     print("="*70)
 
-    print("\n🔄 Создаю summary диалога...")
+    print(f"\n📊 Диалог завершён:")
+    print(f"   • Всего сообщений: {message_count}")
+    print(f"   • Всего использовано токенов: {total_tokens_used}")
+    print(f"   • Сообщений в текущей истории: {len(conversation_history)}")
 
-    messages_to_summarize = conversation_history.copy()
-    tokens_before = calculate_tokens(messages_to_summarize)
+    if saved_filepath:
+        print(f"\n💾 Файл с контекстом: {saved_filepath}")
+        print(f"   При следующем запуске вы сможете загрузить этот контекст!")
+    else:
+        # Если не было сжатия, предлагаем сохранить текущую историю
+        if conversation_history:
+            print(f"\n💾 Сохраняю текущую историю диалога...")
+            saved_filepath = save_context_to_json(conversation_history)
+            print(f"✅ Контекст сохранён в файл: {saved_filepath}")
 
-    summary = create_conversation_summary(messages_to_summarize)
-
-    print(f"\n📝 Summary создан:")
-    print(f"   {summary[:200]}...")
-
-    # Replace history with summary
-    conversation_history = [
-        {
-            "role": "system",
-            "content": f"Предыдущий контекст диалога (резюме {len(messages_to_summarize)} сообщений):\n{summary}"
-        }
-    ]
-
-    tokens_after = calculate_tokens(conversation_history)
-
-    print(f"\n📊 Результаты сжатия:")
-    print(f"   • Сообщений до: {len(messages_to_summarize)}")
-    print(f"   • Сообщений после: {len(conversation_history)}")
-    print(f"   • Токенов до: ~{tokens_before}")
-    print(f"   • Токенов после: ~{tokens_after}")
-    print(f"   • Сэкономлено: ~{tokens_before - tokens_after} токенов")
-    print(f"   • Экономия: {100 - (tokens_after / tokens_before * 100):.0f}%")
-
-    # Сохраняем контекст в JSON
-    print(f"\n💾 Сохраняю контекст в JSON...")
-    saved_filepath = save_context_to_json(conversation_history)
-    print(f"✅ Контекст сохранён в файл: {saved_filepath}")
-
-    # Фаза 3: Продолжаем диалог с summary
-    print("\n" + "="*70)
-    print("📊 ФАЗА 3: Продолжение диалога С summary (проверка контекста)")
-    print("="*70)
-
-    for i, question in enumerate(test_questions[6:], 7):
-        print(f"\n🙋 Сообщение #{i}: {question}")
-
-        conversation_history.append({"role": "user", "content": question})
-
-        response, token_usage = call_deepseek_api(conversation_history)
-
-        conversation_history.append({"role": "assistant", "content": response})
-
-        total_tokens_with_compression += token_usage['total_tokens']
-
-        print(f"🤖 Ответ: {response[:200]}...")
-        print(f"📊 Токены: {token_usage['total_tokens']} (запрос: {token_usage['prompt_tokens']}, ответ: {token_usage['completion_tokens']})")
-
-        time.sleep(0.5)
-
-    print(f"\n{'='*70}")
-    print(f"📊 ИТОГО фаза 3 (С сжатием): {total_tokens_with_compression} токенов")
-    print(f"   Сообщений в истории: {len(conversation_history)}")
-    print(f"   Примерно токенов в истории: ~{calculate_tokens(conversation_history)}")
-    print(f"{'='*70}")
-
-    # Итоговое сравнение
-    print("\n" + "="*70)
-    print("🎯 ИТОГОВОЕ СРАВНЕНИЕ")
-    print("="*70)
-
-    print(f"\n💰 Экономия токенов:")
-    print(f"   • Без сжатия (фаза 1): {total_tokens_without_compression} токенов")
-    print(f"   • С сжатием (фаза 3): {total_tokens_with_compression} токенов")
-
-    if total_tokens_with_compression > 0:
-        savings = ((total_tokens_without_compression - total_tokens_with_compression) /
-                   total_tokens_without_compression * 100)
-        print(f"   • Экономия: ~{savings:.0f}% токенов!")
-
-    print(f"\n✅ ВЫВОДЫ (День 10 - Внешняя память):")
-    print(f"   1. Сжатие позволяет существенно снизить расход токенов")
+    print(f"\n✅ ВОЗМОЖНОСТИ (День 10 - Внешняя память):")
+    print(f"   1. Автоматическое сжатие каждые {COMPRESSION_THRESHOLD} сообщений")
     print(f"   2. Контекст диалога сохраняется благодаря качественному summary")
-    print(f"   3. Модель может отвечать на вопросы о прошлом диалоге")
-    print(f"   4. Контекст автоматически сохраняется в JSON после сжатия")
-    print(f"   5. При следующем запуске можно загрузить сохраненный контекст")
-    print(f"   6. Это обеспечивает долговременную память между сеансами!")
-    print(f"   7. DeepSeek Chat отлично справляется с созданием резюме!")
-
-    print(f"\n💾 Файл с контекстом: {saved_filepath}")
-    print(f"   При следующем запуске вы сможете загрузить этот контекст!")
+    print(f"   3. Контекст автоматически сохраняется в JSON после сжатия")
+    print(f"   4. При следующем запуске можно загрузить сохраненный контекст")
+    print(f"   5. Это обеспечивает долговременную память между сеансами!")
+    print(f"   6. DeepSeek Chat отлично справляется с созданием резюме!")
 
     print("\n" + "="*70 + "\n")
 
