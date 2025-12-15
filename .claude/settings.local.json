@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_compression.py:*)",
+      "Bash(pip install:*)",
+      "Bash(if not exist memory mkdir memory)",
+      "Bash(python -m py_compile:*)"
+    ]
+  }
+}
