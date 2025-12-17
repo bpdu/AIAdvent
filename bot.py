@@ -476,18 +476,36 @@ async def call_mcp_tool(tool_name: str, arguments: dict = None):
     }
 
     try:
+        logger.info(f"Connecting to MCP server at {MCP_SERVER_URL}")
         async with sse_client(MCP_SERVER_URL, headers=headers) as (read, write):
+            logger.info("SSE connection established")
             async with ClientSession(read, write) as session:
-                await session.initialize()
+                logger.info("MCP session created")
 
-                result = await session.call_tool(tool_name, arguments or {})
+                # Инициализация с timeout
+                await asyncio.wait_for(session.initialize(), timeout=10.0)
+                logger.info("Session initialized")
+
+                # Вызов tool с timeout
+                logger.info(f"Calling tool: {tool_name}")
+                result = await asyncio.wait_for(
+                    session.call_tool(tool_name, arguments or {}),
+                    timeout=15.0
+                )
+                logger.info(f"Tool call completed")
 
                 # Извлечь текст из результата
                 if result.content and len(result.content) > 0:
+                    logger.info(f"Result content: {len(result.content[0].text)} chars")
                     return result.content[0].text
+                else:
+                    logger.warning("No content in result")
                 return None
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout calling MCP tool: {tool_name}")
+        return None
     except Exception as e:
-        logger.error(f"Error calling MCP tool: {e}")
+        logger.error(f"Error calling MCP tool: {e}", exc_info=True)
         return None
 
 
