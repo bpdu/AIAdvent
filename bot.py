@@ -155,7 +155,7 @@ def compress_command(update: Update, context: CallbackContext) -> None:
         update.message.reply_text(f"❌ Не удалось сжать историю: {compression_result.get('reason', 'Неизвестная ошибка')}")
 
 def ask_question(update: Update, context: CallbackContext) -> None:
-    """Send the user's question to OpenRouter API and return the response."""
+    """Send the user's question to DeepSeek API and return the response."""
     if update.message is None or update.message.text is None:
         update.message.reply_text("Sorry, I couldn't process that message.")
         return
@@ -510,7 +510,6 @@ def send_tasks_summary(context: CallbackContext):
             return
 
         # Парсим JSON
-        import json
         tasks = json.loads(tasks_json)
 
         # Форматируем сводку
@@ -551,7 +550,7 @@ def main() -> None:
     if not TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
         return
-    
+
     # Create the Updater and pass it your bot's token.
     updater = Updater(TOKEN)
 
@@ -565,7 +564,7 @@ def main() -> None:
     dispatcher.add_handler(CommandHandler("compress", compress_command))
     dispatcher.add_handler(CommandHandler("clear", clear_command))
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, ask_question))
-    
+
     # Add error handler
     dispatcher.add_error_handler(error_handler)
 
