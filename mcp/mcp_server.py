@@ -24,8 +24,11 @@ from sse_starlette import EventSourceResponse
 import uvicorn
 
 # Загрузка переменных окружения
-load_dotenv(dotenv_path='../.secrets/yandex-tracker-token.env')
-load_dotenv(dotenv_path='../.secrets/yandex-tracker-org-id.env')
+# Получаем путь к директории проекта (на уровень выше mcp/)
+import pathlib
+project_dir = pathlib.Path(__file__).parent.parent
+load_dotenv(dotenv_path=project_dir / '.secrets' / 'yandex-tracker-token.env')
+load_dotenv(dotenv_path=project_dir / '.secrets' / 'yandex-tracker-org-id.env')
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -151,20 +154,25 @@ async def handle_sse(request: Request):
     read_stream = MCPReadStream()
     write_stream = MCPWriteStream()
 
-    # Импортируем ServerSession
-    from mcp.server.session import ServerSession
-
-    # Создаём сессию
-    session = ServerSession(read_stream, write_stream, mcp_server.create_initialization_options())
+    # Запускаем MCP сервер с этими потоками
+    async def run_server():
+        """Запуск MCP сервера."""
+        async with mcp_server.run(
+            read_stream.read,
+            write_stream.send,
+            mcp_server.create_initialization_options()
+        ):
+            # Ждём завершения
+            await asyncio.Event().wait()
 
     # Сохраняем сессию
-    sessions[session_id] = (session, read_queue, write_queue)
+    sessions[session_id] = (None, read_queue, write_queue)
 
     async def event_generator():
         """Генератор SSE событий."""
         try:
-            # Запускаем обработку сессии в фоне
-            session_task = asyncio.create_task(session.run())
+            # Запускаем обработку сервера в фоне
+            session_task = asyncio.create_task(run_server())
 
             # Отправляем сообщения из очереди
             while True:

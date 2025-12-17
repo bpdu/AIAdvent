@@ -193,10 +193,15 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     keywords = ["задач", "task", "tracker", "issue", "трекер"]
     message_lower = user_question.lower()
 
-    if any(keyword in message_lower for keyword in keywords):
+    logger.info(f"Checking message for tracker keywords: '{message_lower}'")
+    keyword_found = any(keyword in message_lower for keyword in keywords)
+    logger.info(f"Keyword found: {keyword_found}")
+
+    if keyword_found:
         logger.info("Detected tracker-related question, calling MCP...")
         try:
             tasks_json = call_mcp_tool_sync("get-tracker-tasks")
+            logger.info(f"MCP response received: {len(tasks_json) if tasks_json else 0} chars")
 
             if tasks_json:
                 # Добавить задачи в контекст
