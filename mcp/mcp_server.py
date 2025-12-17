@@ -52,7 +52,7 @@ def get_tracker_tasks():
 
     headers = {
         'Authorization': f'OAuth {TRACKER_TOKEN}',
-        'X-Org-ID': TRACKER_ORG_ID,
+        'X-Cloud-Org-Id': TRACKER_ORG_ID,  # Yandex Tracker uses X-Cloud-Org-Id
         'Content-Type': 'application/json'
     }
 
