@@ -142,12 +142,30 @@ async def handle_sse(request: Request):
     read_queue: asyncio.Queue = asyncio.Queue()
     write_queue: asyncio.Queue = asyncio.Queue()
 
-    # Создаём потоки для MCP сервера
+    # Создаём потоки для MCP сервера с правильными context managers
     class MCPReadStream:
-        async def read(self):
-            return await read_queue.get()
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            message = await read_queue.get()
+            if message is None:
+                raise StopAsyncIteration
+            return message
 
     class MCPWriteStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
         async def send(self, message):
             await write_queue.put(message)
 
@@ -160,8 +178,8 @@ async def handle_sse(request: Request):
         try:
             # Запускаем сервер с нашими read/write потоками
             await mcp_server.run(
-                read_stream.read,
-                write_stream.send,
+                read_stream,
+                write_stream,
                 mcp_server.create_initialization_options()
             )
         except Exception as e:
