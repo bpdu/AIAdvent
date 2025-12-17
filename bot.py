@@ -585,10 +585,10 @@ def main() -> None:
     # Add error handler
     dispatcher.add_error_handler(error_handler)
 
-    # Add periodic job for tasks summary (every 30 minutes = 1800 seconds)
+    # Add periodic job for tasks summary (every 10 minutes = 600 seconds)
     job_queue = updater.job_queue
-    job_queue.run_repeating(send_tasks_summary, interval=1800, first=1800)
-    logger.info("Scheduled tasks summary job (every 30 minutes)")
+    job_queue.run_repeating(send_tasks_summary, interval=600, first=600)
+    logger.info("Scheduled tasks summary job (every 10 minutes)")
 
     # Start the Bot
     updater.start_polling()
