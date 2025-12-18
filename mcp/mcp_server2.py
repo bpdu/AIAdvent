@@ -1,8 +1,9 @@
 """
-MCP Server с LibreTranslate API для перевода на эсперанто
+MCP Server с MyMemory API для перевода на эсперанто
 День 14: Композиция MCP-инструментов
 
-WebSocket сервер для перевода текста на эсперанто через LibreTranslate API.
+WebSocket сервер для перевода текста на эсперанто через MyMemory Translation API.
+Бесплатный API без регистрации, лимит: 10000 слов/день.
 """
 
 import asyncio
@@ -23,41 +24,41 @@ import uvicorn
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# LibreTranslate API configuration
-LIBRETRANSLATE_API_URL = "https://libretranslate.com/translate"
-LIBRETRANSLATE_LANGUAGES_URL = "https://libretranslate.com/languages"
+# MyMemory Translation API configuration (free, no registration required)
+MYMEMORY_API_URL = "https://api.mymemory.translated.net/get"
 
 # Создаём MCP сервер
 mcp_server = Server("translation-mcp-server")
 
 
 def check_esperanto_available():
-    """Проверить, доступен ли эсперанто на LibreTranslate сервере."""
+    """Проверить, доступен ли эсперанто на MyMemory API."""
     try:
-        logger.info("Checking if Esperanto is available on LibreTranslate...")
-        response = requests.get(LIBRETRANSLATE_LANGUAGES_URL, timeout=5)
+        logger.info("Checking if MyMemory API is available...")
+        # Пробный запрос для проверки работы API
+        test_params = {
+            "q": "test",
+            "langpair": "ru|eo"
+        }
+        response = requests.get(MYMEMORY_API_URL, params=test_params, timeout=5)
         response.raise_for_status()
-        languages = response.json()
 
-        # Проверяем наличие кода "eo" (Esperanto)
-        eo_available = any(lang.get("code") == "eo" for lang in languages)
-
-        if eo_available:
-            logger.info("✓ Esperanto (eo) is available on LibreTranslate")
+        result = response.json()
+        if result.get("responseStatus") == 200:
+            logger.info("✓ MyMemory API is working, Esperanto supported")
+            return True
         else:
-            logger.warning("✗ Esperanto (eo) is NOT available on this LibreTranslate instance")
-            logger.info(f"Available languages: {[lang.get('code') for lang in languages[:10]]}")
-
-        return eo_available
+            logger.warning(f"✗ MyMemory API returned status: {result.get('responseStatus')}")
+            return False
 
     except Exception as e:
-        logger.error(f"Error checking language support: {e}")
+        logger.error(f"Error checking MyMemory API: {e}")
         return False
 
 
 def translate_to_esperanto(text: str) -> str:
     """
-    Перевести русский текст на эсперанто через LibreTranslate API.
+    Перевести русский текст на эсперанто через MyMemory Translation API.
 
     Args:
         text: Текст на русском языке для перевода
@@ -71,55 +72,63 @@ def translate_to_esperanto(text: str) -> str:
     try:
         logger.info(f"Translating text to Esperanto ({len(text)} chars)...")
 
-        # Подготовка запроса к LibreTranslate API
-        payload = {
-            "q": text,
-            "source": "ru",  # Russian
-            "target": "eo",  # Esperanto
-            "format": "text",
-            "api_key": ""  # Публичный API, ключ не требуется
-        }
+        # MyMemory API имеет лимит на длину текста (~500 символов за раз)
+        # Если текст длинный, разбиваем на части
+        max_chunk_size = 500
 
-        # Отправка POST запроса
-        response = requests.post(
-            LIBRETRANSLATE_API_URL,
-            json=payload,
-            timeout=30  # Более длинный timeout для больших текстов
-        )
+        if len(text) > max_chunk_size:
+            logger.info(f"Text is long ({len(text)} chars), splitting into chunks...")
+            # Разбиваем по параграфам
+            paragraphs = text.split('\n\n')
+            translated_parts = []
 
-        logger.info(f"LibreTranslate response status: {response.status_code}")
+            for para in paragraphs:
+                if not para.strip():
+                    translated_parts.append('')
+                    continue
 
-        if response.status_code != 200:
-            logger.error(f"LibreTranslate API error: {response.text}")
-            return json.dumps({
-                "error": f"LibreTranslate API returned status {response.status_code}",
-                "original_text": text
-            })
+                # Если параграф все еще слишком длинный, разбиваем по предложениям
+                if len(para) > max_chunk_size:
+                    sentences = para.split('. ')
+                    chunk = ''
+                    para_translation = []
 
-        response.raise_for_status()
-        result = response.json()
+                    for sentence in sentences:
+                        if len(chunk) + len(sentence) < max_chunk_size:
+                            chunk += sentence + '. '
+                        else:
+                            if chunk:
+                                trans = _translate_chunk(chunk.strip())
+                                if trans:
+                                    para_translation.append(trans)
+                            chunk = sentence + '. '
 
-        # Извлекаем переведенный текст
-        translated_text = result.get("translatedText", "")
+                    if chunk:
+                        trans = _translate_chunk(chunk.strip())
+                        if trans:
+                            para_translation.append(trans)
 
-        if not translated_text:
-            logger.error("Empty translation received from LibreTranslate")
-            return json.dumps({
-                "error": "Empty translation received",
-                "original_text": text
-            })
+                    translated_parts.append(' '.join(para_translation))
+                else:
+                    trans = _translate_chunk(para)
+                    if trans:
+                        translated_parts.append(trans)
 
-        logger.info(f"Translation successful ({len(translated_text)} chars)")
-        return translated_text
+            final_translation = '\n\n'.join(translated_parts)
+            logger.info(f"Translation successful ({len(final_translation)} chars)")
+            return final_translation
+        else:
+            # Короткий текст, переводим целиком
+            return _translate_chunk(text)
 
     except requests.exceptions.Timeout:
-        logger.error("LibreTranslate API timeout")
+        logger.error("MyMemory API timeout")
         return json.dumps({
             "error": "Translation service timeout",
             "original_text": text
         })
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling LibreTranslate API: {e}")
+        logger.error(f"Error calling MyMemory API: {e}")
         return json.dumps({
             "error": f"Translation service error: {str(e)}",
             "original_text": text
@@ -132,13 +141,58 @@ def translate_to_esperanto(text: str) -> str:
         })
 
 
+def _translate_chunk(text: str) -> str:
+    """
+    Перевести небольшой фрагмент текста через MyMemory API.
+
+    Args:
+        text: Текст для перевода (должен быть < 500 символов)
+
+    Returns:
+        Переведенный текст
+    """
+    params = {
+        "q": text,
+        "langpair": "ru|eo"  # Russian to Esperanto
+    }
+
+    response = requests.get(
+        MYMEMORY_API_URL,
+        params=params,
+        timeout=30
+    )
+
+    logger.info(f"MyMemory API response status: {response.status_code}")
+
+    if response.status_code != 200:
+        logger.error(f"MyMemory API error: {response.text}")
+        raise Exception(f"MyMemory API returned status {response.status_code}")
+
+    response.raise_for_status()
+    result = response.json()
+
+    # Проверяем статус ответа
+    if result.get("responseStatus") != 200:
+        logger.error(f"MyMemory API error: {result}")
+        raise Exception(f"MyMemory API error: {result.get('responseDetails', 'Unknown error')}")
+
+    # Извлекаем переведенный текст
+    translated_text = result.get("responseData", {}).get("translatedText", "")
+
+    if not translated_text:
+        logger.error("Empty translation received from MyMemory")
+        raise Exception("Empty translation received")
+
+    return translated_text
+
+
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
     """Возвращает список доступных инструментов."""
     return [
         Tool(
             name="translate-to-esperanto",
-            description="Translate Russian text to Esperanto using LibreTranslate API",
+            description="Translate Russian text to Esperanto using MyMemory Translation API",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -179,7 +233,7 @@ async def root(request: Request):
             "protocol": "MCP",
             "endpoint": "/mcp",
             "tools": 1,
-            "description": "Translate text to Esperanto via LibreTranslate API"
+            "description": "Translate text to Esperanto via MyMemory Translation API"
         }),
         media_type="application/json"
     )
@@ -237,7 +291,7 @@ async def handle_websocket(websocket: WebSocket):
                             "tools": [
                                 {
                                     "name": "translate-to-esperanto",
-                                    "description": "Translate Russian text to Esperanto using LibreTranslate API",
+                                    "description": "Translate Russian text to Esperanto using MyMemory Translation API",
                                     "inputSchema": {
                                         "type": "object",
                                         "properties": {
@@ -354,18 +408,19 @@ if __name__ == "__main__":
     logger.info("День 14: Композиция MCP-инструментов")
     logger.info("=" * 60)
 
-    # Проверяем доступность эсперанто
+    # Проверяем доступность MyMemory API
     esperanto_available = check_esperanto_available()
 
-    logger.info(f"LibreTranslate API: {LIBRETRANSLATE_API_URL}")
-    logger.info(f"Esperanto support: {'✓ available' if esperanto_available else '✗ unavailable'}")
+    logger.info(f"MyMemory API: {MYMEMORY_API_URL}")
+    logger.info(f"API Status: {'✓ available' if esperanto_available else '✗ unavailable'}")
     logger.info("Доступные инструменты: 1")
     logger.info("  - translate-to-esperanto: Translate Russian text to Esperanto")
+    logger.info("Лимит: 10000 слов/день (бесплатный API)")
     logger.info("=" * 60)
     logger.info("WebSocket endpoint: ws://localhost:8081/mcp")
     logger.info("=" * 60)
 
     if not esperanto_available:
-        logger.warning("⚠️  Esperanto may not be available - translations might fail")
+        logger.warning("⚠️  MyMemory API may not be available - translations might fail")
 
     uvicorn.run(app, host="0.0.0.0", port=8081)
