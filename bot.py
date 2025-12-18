@@ -264,6 +264,9 @@ def ask_question(update: Update, context: CallbackContext) -> None:
                 f"⚠️ Критическая ошибка при выполнении анализа задач: {str(e)}"
             )
 
+        # Завершить обработку - пайплайн уже выдал результаты
+        return
+
     # Add user message to conversation history
     context.user_data['conversation_history'].append({
         "role": "user",
