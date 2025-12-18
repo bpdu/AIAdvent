@@ -33,7 +33,8 @@ DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 MODEL_NAME = 'deepseek-chat'  # Main DeepSeek model
 
 # MCP configuration
-MCP_SERVER_URL = "ws://localhost:8080/mcp"
+MCP_SERVER_URL = "ws://localhost:8080/mcp"  # Yandex Tracker
+MCP_SERVER2_URL = "ws://localhost:8081/mcp"  # Translation
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
@@ -198,26 +199,70 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     logger.info(f"Keyword found: {keyword_found}")
 
     if keyword_found:
-        logger.info("Detected tracker-related question, calling MCP...")
-        try:
-            tasks_json = call_mcp_tool_sync("get-tracker-tasks")
-            logger.info(f"MCP response received: {len(tasks_json) if tasks_json else 0} chars")
+        logger.info("Detected tracker-related question, executing pipeline...")
+        update.message.reply_text("🔄 Запускаю анализ задач из Yandex Tracker...")
 
-            if tasks_json:
-                # Добавить задачи в контекст
+        try:
+            # Выполнить полный пайплайн
+            pipeline_result = execute_tasks_pipeline()
+
+            if not pipeline_result["success"]:
+                # Ошибка в пайплайне
+                error_msg = f"⚠️ Ошибка на этапе '{pipeline_result['step']}': {pipeline_result.get('error', 'Unknown error')}"
+                update.message.reply_text(error_msg)
+
+                # Если удалось получить задачи, добавим их в контекст
+                if pipeline_result.get("tasks_json"):
+                    tracker_context = {
+                        "role": "system",
+                        "content": f"Список задач из Yandex Tracker:\n{pipeline_result['tasks_json']}"
+                    }
+                    context.user_data['conversation_history'].insert(0, tracker_context)
+            else:
+                # Пайплайн успешно выполнен
+                update.message.reply_text("✅ Анализ завершён!")
+
+                # Показать русский анализ
+                if pipeline_result.get("analysis"):
+                    # Разбиваем на части, если текст длинный (Telegram limit 4096 chars)
+                    analysis_text = f"📊 Анализ задач:\n\n{pipeline_result['analysis']}"
+                    if len(analysis_text) > 4000:
+                        update.message.reply_text(analysis_text[:4000])
+                        update.message.reply_text(analysis_text[4000:])
+                    else:
+                        update.message.reply_text(analysis_text)
+
+                # Показать перевод на эсперанто (если доступен)
+                if pipeline_result.get("translation"):
+                    translation_text = f"🌐 Traduko en Esperanton:\n\n{pipeline_result['translation']}"
+                    if len(translation_text) > 4000:
+                        update.message.reply_text(translation_text[:4000])
+                        update.message.reply_text(translation_text[4000:])
+                    else:
+                        update.message.reply_text(translation_text)
+                elif pipeline_result.get("error") and "перевод" in pipeline_result["error"].lower():
+                    update.message.reply_text(
+                        "⚠️ Перевод на эсперанто временно недоступен. Показан русский вариант."
+                    )
+
+                # Добавить в контекст разговора
+                context_content = f"Анализ задач из Yandex Tracker:\n{pipeline_result['analysis']}"
+                if pipeline_result.get("translation"):
+                    context_content += f"\n\nПеревод на эсперанто:\n{pipeline_result['translation']}"
+
                 tracker_context = {
                     "role": "system",
-                    "content": f"Список задач из Yandex Tracker:\n{tasks_json}\n\nИспользуй эти данные для ответа на вопрос пользователя."
+                    "content": context_content
                 }
-                # Вставить в начало истории
                 context.user_data['conversation_history'].insert(0, tracker_context)
-                logger.info("Added tracker tasks to conversation context")
-            else:
-                logger.error("Failed to get tasks from MCP")
+
+            logger.info("Pipeline execution completed")
 
         except Exception as e:
-            logger.error(f"Error calling MCP: {e}")
-            update.message.reply_text("⚠️ Не удалось получить задачи из Tracker")
+            logger.error(f"Error executing pipeline: {e}", exc_info=True)
+            update.message.reply_text(
+                f"⚠️ Критическая ошибка при выполнении анализа задач: {str(e)}"
+            )
 
     # Add user message to conversation history
     context.user_data['conversation_history'].append({
@@ -466,6 +511,68 @@ def call_deepseek_api(messages) -> tuple:
         error_msg = f"Sorry, I encountered an error while processing your request: {str(e)}"
         return (error_msg, {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0})
 
+
+def analyze_tasks_order(tasks_json: str) -> str:
+    """
+    Анализ задач и создание рекомендованного порядка выполнения через DeepSeek.
+
+    Args:
+        tasks_json: JSON строка с задачами из Yandex Tracker
+
+    Returns:
+        Структурированный отчёт с анализом и рекомендованным порядком задач
+    """
+    analysis_prompt = f"""Проанализируй следующий список задач из Yandex Tracker.
+
+Задачи:
+{tasks_json}
+
+Твоя задача:
+1. Определи логический порядок выполнения задач
+2. Найди зависимости (например, "Уточнить потребность" должно быть перед "Заказать")
+3. Учти приоритеты и статусы задач
+4. Создай структурированный отчёт с рекомендованным порядком
+
+Формат ответа:
+# Анализ задач из Yandex Tracker
+
+## Рекомендованный порядок выполнения:
+
+1. [KEY] - Название задачи
+   Причина: [объяснение почему эта задача должна быть первой]
+   Статус: [текущий статус]
+
+2. [KEY] - Название задачи
+   Причина: [объяснение]
+   Статус: [текущий статус]
+
+[и так далее...]
+
+## Выводы:
+[Краткие выводы о зависимостях и приоритетах]
+"""
+
+    messages = [
+        {
+            "role": "system",
+            "content": "Ты - эксперт по управлению проектами. Анализируешь задачи и определяешь оптимальный порядок их выполнения."
+        },
+        {
+            "role": "user",
+            "content": analysis_prompt
+        }
+    ]
+
+    try:
+        logger.info("Analyzing tasks with DeepSeek...")
+        response_text, token_usage = call_deepseek_api(messages)
+        logger.info(f"Task analysis completed. Tokens used: {token_usage['total_tokens']}")
+        return response_text
+    except Exception as e:
+        logger.error(f"Error analyzing tasks: {e}")
+        return f"Ошибка анализа задач: {str(e)}"
+
+
 # MCP Client functions
 async def call_mcp_tool(tool_name: str, arguments: dict = None):
     """Вызов MCP tool через WebSocket и получение результата."""
@@ -510,6 +617,150 @@ def call_mcp_tool_sync(tool_name: str, arguments: dict = None):
         return loop.run_until_complete(call_mcp_tool(tool_name, arguments))
     finally:
         loop.close()
+
+
+def call_mcp_tool_sync_on_server(server_url: str, tool_name: str, arguments: dict = None):
+    """
+    Синхронная обертка для вызова MCP tool на конкретном сервере.
+
+    Args:
+        server_url: WebSocket URL МCP сервера (например, ws://localhost:8081/mcp)
+        tool_name: Имя инструмента для вызова
+        arguments: Аргументы инструмента (опционально)
+
+    Returns:
+        Текст результата или None при ошибке
+    """
+    async def call_tool_async():
+        try:
+            logger.info(f"Connecting to MCP server at {server_url}")
+            async with websocket_client(server_url) as (read, write):
+                logger.info("WebSocket connection established")
+                async with ClientSession(read, write) as session:
+                    logger.info("MCP session created")
+
+                    # Инициализация с timeout
+                    await asyncio.wait_for(session.initialize(), timeout=10.0)
+                    logger.info("Session initialized")
+
+                    # Вызов tool с увеличенным timeout для перевода
+                    logger.info(f"Calling tool: {tool_name}")
+                    result = await asyncio.wait_for(
+                        session.call_tool(tool_name, arguments or {}),
+                        timeout=30.0  # Длинный timeout для перевода
+                    )
+                    logger.info(f"Tool call completed")
+
+                    if result.content and len(result.content) > 0:
+                        return result.content[0].text
+                    else:
+                        logger.warning("No content in result")
+                    return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout calling {tool_name} on {server_url}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling {tool_name} on {server_url}: {e}", exc_info=True)
+            return None
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(call_tool_async())
+    finally:
+        loop.close()
+
+
+def execute_tasks_pipeline() -> dict:
+    """
+    Выполнить полный пайплайн: Получить задачи -> Проанализировать -> Перевести.
+
+    Returns:
+        dict со структурой:
+        {
+            "success": bool,
+            "step": str,  # Последний успешный шаг
+            "tasks_json": str,
+            "analysis": str,
+            "translation": str,
+            "error": str  # Если произошла ошибка
+        }
+    """
+    result = {
+        "success": False,
+        "step": "none",
+        "tasks_json": None,
+        "analysis": None,
+        "translation": None,
+        "error": None
+    }
+
+    try:
+        # Шаг 1: Получить задачи из Yandex Tracker через MCP Server 1
+        logger.info("Pipeline Step 1: Fetching tasks from Yandex Tracker")
+        tasks_json = call_mcp_tool_sync_on_server(
+            MCP_SERVER_URL,
+            "get-tracker-tasks"
+        )
+
+        if not tasks_json or "error" in tasks_json.lower():
+            result["error"] = "Не удалось получить задачи из Yandex Tracker"
+            result["step"] = "fetch_tasks"
+            return result
+
+        result["tasks_json"] = tasks_json
+        result["step"] = "fetch_tasks"
+        logger.info(f"Step 1 complete: Retrieved {len(tasks_json)} chars")
+
+        # Шаг 2: Анализ задач с помощью DeepSeek
+        logger.info("Pipeline Step 2: Analyzing tasks with DeepSeek")
+        analysis = analyze_tasks_order(tasks_json)
+
+        if not analysis or "ошибка" in analysis.lower()[:100]:
+            result["error"] = "Не удалось проанализировать задачи"
+            result["step"] = "analyze_tasks"
+            return result
+
+        result["analysis"] = analysis
+        result["step"] = "analyze_tasks"
+        logger.info(f"Step 2 complete: Analysis {len(analysis)} chars")
+
+        # Шаг 3: Перевод на эсперанто через MCP Server 2
+        logger.info("Pipeline Step 3: Translating to Esperanto")
+        translation_response = call_mcp_tool_sync_on_server(
+            MCP_SERVER2_URL,
+            "translate-to-esperanto",
+            {"text": analysis}
+        )
+
+        if not translation_response:
+            # Перевод опционален - не критическая ошибка
+            logger.warning("Translation failed, using Russian version")
+            result["translation"] = None
+            result["error"] = "Перевод недоступен"
+        else:
+            # Проверяем, не вернулась ли ошибка в JSON формате
+            try:
+                error_check = json.loads(translation_response)
+                if isinstance(error_check, dict) and "error" in error_check:
+                    logger.warning(f"Translation error: {error_check['error']}")
+                    result["translation"] = None
+                    result["error"] = "Перевод недоступен"
+                else:
+                    result["translation"] = translation_response
+                    logger.info(f"Step 3 complete: Translation {len(translation_response)} chars")
+            except (json.JSONDecodeError, ValueError):
+                # Не JSON - значит это обычный переведенный текст
+                result["translation"] = translation_response
+                logger.info(f"Step 3 complete: Translation {len(translation_response)} chars")
+
+        result["success"] = True
+        result["step"] = "complete"
+        return result
+
+    except Exception as e:
+        logger.error(f"Pipeline error at step {result['step']}: {e}", exc_info=True)
+        result["error"] = str(e)
+        return result
 
 
 def send_tasks_summary(context: CallbackContext):
