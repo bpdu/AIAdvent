@@ -267,6 +267,64 @@ def ask_question(update: Update, context: CallbackContext) -> None:
         # Завершить обработку - пайплайн уже выдал результаты
         return
 
+    # Проверка на ключевые слова про мониторинг
+    monitoring_keywords = ["мониторинг", "health", "состояние сервера", "метрики", "monitoring", "статус сервера"]
+    monitoring_keyword_found = any(keyword in message_lower for keyword in monitoring_keywords)
+
+    if monitoring_keyword_found:
+        logger.info("Detected monitoring-related question, starting Docker monitoring...")
+        update.message.reply_text("🔄 Запускаю мониторинг хоста...")
+
+        try:
+            # Вызвать MCP tool для запуска мониторинга
+            monitoring_result_json = call_mcp_tool_sync_on_server(
+                MCP_SERVER_URL,
+                "start-monitoring",
+                {"port": 8001}
+            )
+
+            if not monitoring_result_json:
+                update.message.reply_text("⚠️ Не удалось запустить мониторинг. MCP сервер недоступен.")
+                return
+
+            # Парсим результат
+            try:
+                monitoring_result = json.loads(monitoring_result_json)
+
+                if monitoring_result.get("success"):
+                    # Успешно запущен
+                    url = monitoring_result.get("url")
+                    container_id = monitoring_result.get("container_id")
+                    port = monitoring_result.get("port")
+
+                    success_msg = (
+                        f"✅ Мониторинг запущен!\n\n"
+                        f"🌐 URL: {url}\n"
+                        f"🐳 Container: {container_id}\n"
+                        f"🔌 Port: {port}\n\n"
+                        f"📊 Откройте ссылку в браузере для просмотра метрик.\n"
+                        f"Страница автоматически обновляется каждые 5 секунд."
+                    )
+                    update.message.reply_text(success_msg)
+                else:
+                    # Ошибка при запуске
+                    error = monitoring_result.get("error", "Unknown error")
+                    update.message.reply_text(f"⚠️ Ошибка при запуске мониторинга: {error}")
+
+            except json.JSONDecodeError:
+                # Не JSON ответ
+                update.message.reply_text(f"Результат: {monitoring_result_json}")
+
+            logger.info("Monitoring request completed")
+            return
+
+        except Exception as e:
+            logger.error(f"Error starting monitoring: {e}", exc_info=True)
+            update.message.reply_text(
+                f"⚠️ Критическая ошибка при запуске мониторинга: {str(e)}"
+            )
+            return
+
     # Add user message to conversation history
     context.user_data['conversation_history'].append({
         "role": "user",
