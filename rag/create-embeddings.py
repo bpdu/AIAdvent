@@ -273,12 +273,12 @@ def process_api_spec(spec: dict, conn: sqlite3.Connection):
             logger.info(f"  Created {len(chunks)} chunk(s)")
 
             # Для каждого чанка: генерировать эмбеддинг и сохранить
-            for chunk_idx, chunk_text in enumerate(chunks):
+            for chunk_idx, current_chunk in enumerate(chunks):
                 logger.info(f"  Generating embedding for chunk {chunk_idx + 1}/{len(chunks)}...")
 
                 try:
                     # Генерировать эмбеддинг
-                    embedding = generate_embedding(chunk_text)
+                    embedding = generate_embedding(current_chunk)
                     embedding_blob = pickle.dumps(embedding)
 
                     # Сохранить в БД
@@ -286,7 +286,7 @@ def process_api_spec(spec: dict, conn: sqlite3.Connection):
                     INSERT INTO embeddings (chunk_text, embedding, endpoint_path, method, tag, original_json)
                     VALUES (?, ?, ?, ?, ?, ?)
                     ''', (
-                        chunk_text,
+                        current_chunk,
                         embedding_blob,
                         path,
                         method.upper(),
