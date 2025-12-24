@@ -433,17 +433,23 @@ def ask_question(update: Update, context: CallbackContext) -> None:
                 if filter_stats.get('adaptive_cutoff'):
                     filtered_msg += f"• Адаптивный порог: {filter_stats['adaptive_cutoff']:.1%}\n"
 
-                filtered_msg += "\n📚 Отфильтрованные документы:\n"
-                for i, chunk in enumerate(chunks_filtered, 1):
-                    filtered_msg += (
-                        f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
-                        f"   Релевантность: {chunk['similarity']:.1%}\n"
-                        f"   Категория: {chunk['tag']}\n"
-                    )
+                # Проверить, был ли откат к нефильтрованным результатам
+                if filter_stats.get('output_count', 0) == 0:
+                    # Все документы отфильтрованы
+                    filtered_msg += "\n❌ Результат: Нет релевантных документов выше порога 50%."
+                else:
+                    # Есть отфильтрованные документы - показать их
+                    filtered_msg += "\n📚 Отфильтрованные документы:\n"
+                    for i, chunk in enumerate(chunks_filtered, 1):
+                        filtered_msg += (
+                            f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
+                            f"   Релевантность: {chunk['similarity']:.1%}\n"
+                            f"   Категория: {chunk['tag']}\n"
+                        )
 
-                if rag_result["answer_with_rag_filtered"]:
-                    filtered_msg += f"\n\n💬 Ответ:\n{rag_result['answer_with_rag_filtered']}\n\n"
-                    filtered_msg += f"📊 Токенов: {rag_result['tokens_with_rag_filtered']['total_tokens']}"
+                    if rag_result["answer_with_rag_filtered"]:
+                        filtered_msg += f"\n\n💬 Ответ:\n{rag_result['answer_with_rag_filtered']}\n\n"
+                        filtered_msg += f"📊 Токенов: {rag_result['tokens_with_rag_filtered']['total_tokens']}"
 
                 if len(filtered_msg) > 4000:
                     update.message.reply_text(filtered_msg[:4000])
