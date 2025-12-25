@@ -366,114 +366,32 @@ def ask_question(update: Update, context: CallbackContext) -> None:
     api_keyword_found = any(keyword in message_lower for keyword in api_keywords)
 
     if api_keyword_found and RAG_AVAILABLE:
-        logger.info("Detected API-related question, using RAG...")
+        logger.info("Detected API-related question, using RAG with conversation history...")
         update.message.reply_text("🔍 Ищу информацию в документации Pond Mobile API...")
 
         try:
-            # Выполнить RAG-запрос с сравнением
-            rag_result = handle_rag_query(user_question)
+            # Выполнить RAG-запрос с передачей истории диалога
+            rag_result = handle_rag_query(
+                question=user_question,
+                conversation_history=context.user_data.get('conversation_history', [])
+            )
 
             if not rag_result["success"]:
                 error_msg = f"⚠️ Ошибка RAG: {rag_result.get('error', 'Unknown error')}"
                 update.message.reply_text(error_msg)
-                # Продолжить с обычным ответом
+                # Продолжить с обычным ответом (fallback)
             else:
-                # Показать результаты 3-х вариантов сравнения
-                update.message.reply_text(
-                    "✅ Анализ завершён! Сравниваю 3 варианта:\n"
-                    "1️⃣ Без RAG (baseline)\n"
-                    "2️⃣ С RAG без фильтрации\n"
-                    "3️⃣ С RAG с фильтрацией"
-                )
+                # Форматировать и отправить единое сообщение
+                response_message = format_rag_response_for_telegram(rag_result)
+                send_long_message(update, response_message)
 
-                # 1. Ответ БЕЗ RAG
-                without_rag_msg = (
-                    "1️⃣ ОТВЕТ БЕЗ RAG (baseline):\n\n"
-                    f"{rag_result['answer_without_rag']}\n\n"
-                    f"📊 Токенов: {rag_result['tokens_without_rag']['total_tokens']}"
-                )
-                if len(without_rag_msg) > 4000:
-                    update.message.reply_text(without_rag_msg[:4000])
-                    update.message.reply_text(without_rag_msg[4000:])
-                else:
-                    update.message.reply_text(without_rag_msg)
+                # ВАЖНО: Добавить ответ в историю диалога
+                context.user_data['conversation_history'].append({
+                    "role": "assistant",
+                    "content": rag_result['answer']  # Только текст ответа
+                })
 
-                # 2. С RAG БЕЗ ФИЛЬТРАЦИИ
-                if rag_result["relevant_chunks_unfiltered"]:
-                    chunks_unfiltered = rag_result["relevant_chunks_unfiltered"]
-                    unfiltered_msg = "2️⃣ С RAG БЕЗ ФИЛЬТРАЦИИ\n\n📚 Найденные документы:\n"
-                    for i, chunk in enumerate(chunks_unfiltered, 1):
-                        unfiltered_msg += (
-                            f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
-                            f"   Релевантность: {chunk['similarity']:.1%}\n"
-                            f"   Категория: {chunk['tag']}\n"
-                        )
-
-                    if rag_result["answer_with_rag_unfiltered"]:
-                        unfiltered_msg += f"\n\n💬 Ответ:\n{rag_result['answer_with_rag_unfiltered']}\n\n"
-                        unfiltered_msg += f"📊 Токенов: {rag_result['tokens_with_rag_unfiltered']['total_tokens']}"
-
-                    if len(unfiltered_msg) > 4000:
-                        update.message.reply_text(unfiltered_msg[:4000])
-                        update.message.reply_text(unfiltered_msg[4000:])
-                    else:
-                        update.message.reply_text(unfiltered_msg)
-
-                # 3. С RAG С ФИЛЬТРАЦИЕЙ
-                filter_stats = rag_result["filter_stats"]
-                chunks_filtered = rag_result["relevant_chunks_filtered"]
-
-                filtered_msg = "3️⃣ С RAG С ФИЛЬТРАЦИЕЙ (hybrid)\n\n"
-                filtered_msg += "🔍 Статистика фильтрации:\n"
-                filtered_msg += f"• До фильтрации: {filter_stats.get('input_count', 0)} документов\n"
-                filtered_msg += f"• После фильтрации: {filter_stats.get('output_count', 0)} документов\n"
-                filtered_msg += f"• Отфильтровано (строгий порог ≥50%): {filter_stats.get('filtered_strict', 0)}\n"
-                filtered_msg += f"• Отфильтровано (адаптивный ≥85% от топа): {filter_stats.get('filtered_adaptive', 0)}\n"
-                filtered_msg += f"• Топ релевантность: {filter_stats.get('top_score', 0):.1%}\n"
-                if filter_stats.get('adaptive_cutoff'):
-                    filtered_msg += f"• Адаптивный порог: {filter_stats['adaptive_cutoff']:.1%}\n"
-
-                # Проверить, был ли откат к нефильтрованным результатам
-                if filter_stats.get('output_count', 0) == 0:
-                    # Все документы отфильтрованы
-                    filtered_msg += "\n❌ Результат: Нет релевантных документов выше порога 50%."
-                else:
-                    # Есть отфильтрованные документы - показать их
-                    filtered_msg += "\n📚 Отфильтрованные документы:\n"
-                    for i, chunk in enumerate(chunks_filtered, 1):
-                        filtered_msg += (
-                            f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
-                            f"   Релевантность: {chunk['similarity']:.1%}\n"
-                            f"   Категория: {chunk['tag']}\n"
-                        )
-
-                    if rag_result["answer_with_rag_filtered"]:
-                        filtered_msg += f"\n\n💬 Ответ:\n{rag_result['answer_with_rag_filtered']}\n\n"
-                        filtered_msg += f"📊 Токенов: {rag_result['tokens_with_rag_filtered']['total_tokens']}"
-
-                if len(filtered_msg) > 4000:
-                    update.message.reply_text(filtered_msg[:4000])
-                    update.message.reply_text(filtered_msg[4000:])
-                else:
-                    update.message.reply_text(filtered_msg)
-
-                # 4. Итоговое сравнение
-                comparison_msg = (
-                    "📊 ИТОГОВОЕ СРАВНЕНИЕ:\n\n"
-                    "Токены:\n"
-                    f"• Без RAG: {rag_result['tokens_without_rag']['total_tokens']}\n"
-                    f"• С RAG (без фильтра): {rag_result['tokens_with_rag_unfiltered']['total_tokens']}\n"
-                    f"• С RAG (с фильтром): {rag_result['tokens_with_rag_filtered']['total_tokens']}\n\n"
-                    "Документы:\n"
-                    f"• Без фильтра: {len(rag_result['relevant_chunks_unfiltered'])}\n"
-                    f"• С фильтром: {len(rag_result['relevant_chunks_filtered'])}\n\n"
-                    "💡 Вывод:\n"
-                    "Фильтрация убирает низкокачественные результаты и улучшает точность RAG.\n"
-                    "Гибридный режим сочетает строгий порог (≥50%) и адаптивную фильтрацию (≥85% от топа)."
-                )
-                update.message.reply_text(comparison_msg)
-
-                logger.info("RAG comparison completed successfully")
+                logger.info("RAG query completed successfully")
                 return
 
         except Exception as e:
@@ -982,46 +900,36 @@ def execute_tasks_pipeline() -> dict:
         return result
 
 
-def handle_rag_query(question: str) -> dict:
+def handle_rag_query(question: str, conversation_history: list = None) -> dict:
     """
-    Обработать запрос с использованием RAG и сравнить три варианта ответа.
+    Обработать запрос с использованием RAG с учётом истории диалога.
 
     Args:
         question: Вопрос пользователя
+        conversation_history: История диалога (опционально)
+                            Формат: [{"role": "user"|"assistant"|"system", "content": str}]
 
     Returns:
-        dict с ответами и метаданными:
+        dict с ответом и метаданными:
         {
             "success": bool,
             "question": str,
-            "answer_without_rag": str,
-            "answer_with_rag_unfiltered": str,
-            "answer_with_rag_filtered": str,
-            "relevant_chunks_unfiltered": list,
-            "relevant_chunks_filtered": list,
-            "context_unfiltered": str,
-            "context_filtered": str,
-            "filter_stats": dict,
-            "tokens_without_rag": dict,
-            "tokens_with_rag_unfiltered": dict,
-            "tokens_with_rag_filtered": dict,
+            "answer": str,                  # Единый ответ с RAG
+            "relevant_chunks": list,        # Отфильтрованные chunks
+            "context": str,                 # RAG контекст
+            "tokens": dict,                 # Статистика токенов
+            "sources_formatted": str,       # Отформатированные источники
             "error": str
         }
     """
     result = {
         "success": False,
         "question": question,
-        "answer_without_rag": None,
-        "answer_with_rag_unfiltered": None,
-        "answer_with_rag_filtered": None,
-        "relevant_chunks_unfiltered": [],
-        "relevant_chunks_filtered": [],
-        "context_unfiltered": "",
-        "context_filtered": "",
-        "filter_stats": {},
-        "tokens_without_rag": {},
-        "tokens_with_rag_unfiltered": {},
-        "tokens_with_rag_filtered": {},
+        "answer": None,
+        "relevant_chunks": [],
+        "context": "",
+        "tokens": {},
+        "sources_formatted": "",
         "error": None
     }
 
@@ -1031,118 +939,202 @@ def handle_rag_query(question: str) -> dict:
             result["error"] = "RAG module not available"
             return result
 
-        logger.info(f"Processing RAG query: '{question}'")
+        logger.info(f"Processing RAG query with conversation history: '{question}'")
 
-        # Шаг 1: Получить ответ БЕЗ RAG (baseline)
-        logger.info("Step 1: Getting answer WITHOUT RAG")
-        messages_without_rag = [
-            {
-                "role": "system",
-                "content": "Ты - полезный AI-ассистент. Отвечай на вопросы пользователя максимально точно."
-            },
-            {
-                "role": "user",
-                "content": question
-            }
-        ]
-
-        answer_without_rag, tokens_without_rag = call_deepseek_api(messages_without_rag)
-        result["answer_without_rag"] = answer_without_rag
-        result["tokens_without_rag"] = tokens_without_rag
-        logger.info(f"Answer without RAG: {len(answer_without_rag)} chars, {tokens_without_rag['total_tokens']} tokens")
-
-        # Шаг 2a: Найти релевантные чанки БЕЗ фильтрации
-        logger.info("Step 2a: Searching WITHOUT filtering")
-        context_unfiltered, chunks_unfiltered, _ = rag_query(question, top_k=3, enable_filtering=False)
-
-        if not chunks_unfiltered:
-            logger.warning("No relevant chunks found")
-            result["error"] = "No relevant documentation found"
-            result["success"] = True  # Partial success - got answer without RAG
-            return result
-
-        result["relevant_chunks_unfiltered"] = chunks_unfiltered
-        result["context_unfiltered"] = context_unfiltered
-        logger.info(f"Found {len(chunks_unfiltered)} unfiltered chunks")
-
-        # Шаг 2b: Получить ответ С RAG (без фильтрации)
-        logger.info("Step 2b: Getting answer WITH RAG (unfiltered)")
-        messages_unfiltered = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты - эксперт по Pond Mobile API. "
-                    "Используй предоставленную документацию для ответа на вопрос пользователя. "
-                    "Если в документации нет информации для ответа, честно скажи об этом. "
-                    "Отвечай на русском языке, чётко и структурированно."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"{context_unfiltered}\n\n---\n\nВопрос пользователя: {question}"
-            }
-        ]
-
-        answer_unfiltered, tokens_unfiltered = call_deepseek_api(messages_unfiltered)
-        result["answer_with_rag_unfiltered"] = answer_unfiltered
-        result["tokens_with_rag_unfiltered"] = tokens_unfiltered
-        logger.info(f"Answer with RAG (unfiltered): {len(answer_unfiltered)} chars, {tokens_unfiltered['total_tokens']} tokens")
-
-        # Шаг 3a: Найти релевантные чанки С фильтрацией (hybrid mode)
-        logger.info("Step 3a: Searching WITH filtering (hybrid)")
-        context_filtered, chunks_filtered, filter_stats = rag_query(
+        # Найти релевантные чанки С фильтрацией (hybrid mode)
+        logger.info("Searching for relevant chunks with filtering...")
+        context_text, chunks, filter_stats = rag_query(
             question,
             top_k=3,
             enable_filtering=True,
             filtering_mode="hybrid"
         )
 
-        result["filter_stats"] = filter_stats
-
-        if not chunks_filtered:
-            logger.warning("All chunks filtered out - using unfiltered results")
-            # Откат к нефильтрованным результатам
-            result["relevant_chunks_filtered"] = chunks_unfiltered
-            result["context_filtered"] = context_unfiltered
-            result["answer_with_rag_filtered"] = answer_unfiltered
-            result["tokens_with_rag_filtered"] = tokens_unfiltered
+        # Проверить, есть ли релевантные документы
+        if not chunks:
+            logger.warning("All chunks filtered out - no relevant documentation found")
             result["success"] = True
+            result["answer"] = (
+                "К сожалению, я не нашёл релевантной информации в документации "
+                "Pond Mobile API для вашего вопроса. Попробуйте переформулировать "
+                "запрос или уточнить детали."
+            )
+            result["sources_formatted"] = "\n📚 Источники: не найдены"
+            result["tokens"] = {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0}
             return result
 
-        result["relevant_chunks_filtered"] = chunks_filtered
-        result["context_filtered"] = context_filtered
-        logger.info(f"Found {len(chunks_filtered)} filtered chunks")
+        result["relevant_chunks"] = chunks
+        result["context"] = context_text
+        logger.info(f"Found {len(chunks)} relevant chunks")
 
-        # Шаг 3b: Получить ответ С RAG (с фильтрацией)
-        logger.info("Step 3b: Getting answer WITH RAG (filtered)")
-        messages_filtered = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты - эксперт по Pond Mobile API. "
-                    "Используй предоставленную документацию для ответа на вопрос пользователя. "
-                    "Если в документации нет информации для ответа, честно скажи об этом. "
-                    "Отвечай на русском языке, чётко и структурированно."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"{context_filtered}\n\n---\n\nВопрос пользователя: {question}"
-            }
-        ]
+        # Подготовить контекст истории диалога
+        history_context = ""
+        if conversation_history:
+            # Ограничить количество сообщений
+            MAX_HISTORY_MESSAGES = 10
+            recent_history = conversation_history[-MAX_HISTORY_MESSAGES:]
 
-        answer_filtered, tokens_filtered = call_deepseek_api(messages_filtered)
-        result["answer_with_rag_filtered"] = answer_filtered
-        result["tokens_with_rag_filtered"] = tokens_filtered
-        logger.info(f"Answer with RAG (filtered): {len(answer_filtered)} chars, {tokens_filtered['total_tokens']} tokens")
+            # Взять только user/assistant сообщения (исключить system)
+            recent_messages = [
+                msg for msg in recent_history
+                if msg.get('role') in ['user', 'assistant']
+            ]
+
+            if recent_messages:
+                history_parts = []
+                for msg in recent_messages:
+                    role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
+                    history_parts.append(f"{role}: {msg['content']}")
+
+                history_context = "\n".join(history_parts)
+                logger.info(f"Using conversation history: {len(recent_messages)} messages")
+
+        # Построить промпт с учётом истории
+        system_message = {
+            "role": "system",
+            "content": (
+                "Ты — AI-ассистент для работы с Pond Mobile API. "
+                "Используй только информацию из предоставленной документации для ответа. "
+                "Учитывай контекст предыдущего диалога, если он есть. "
+                "Если в документации нет нужной информации, честно скажи об этом. "
+                "Отвечай на русском языке, чётко и структурированно."
+            )
+        }
+
+        # Собрать user message
+        user_content_parts = []
+
+        # Добавить историю (если есть)
+        if history_context:
+            user_content_parts.append(
+                "=== КОНТЕКСТ ПРЕДЫДУЩЕГО ДИАЛОГА ===\n" + history_context
+            )
+
+        # Добавить RAG контекст
+        user_content_parts.append(
+            "=== РЕЛЕВАНТНАЯ ДОКУМЕНТАЦИЯ ===\n" + context_text
+        )
+
+        # Добавить текущий вопрос
+        user_content_parts.append(
+            f"=== ТЕКУЩИЙ ВОПРОС ПОЛЬЗОВАТЕЛЯ ===\n{question}"
+        )
+
+        user_message = {
+            "role": "user",
+            "content": "\n\n".join(user_content_parts)
+        }
+
+        messages = [system_message, user_message]
+
+        # Вызвать DeepSeek API
+        logger.info("Calling DeepSeek API with RAG context and conversation history...")
+        answer, tokens = call_deepseek_api(messages)
+
+        result["answer"] = answer
+        result["tokens"] = tokens
+        logger.info(f"Answer generated: {len(answer)} chars, {tokens['total_tokens']} tokens")
+
+        # Форматировать источники
+        result["sources_formatted"] = format_sources_for_telegram(chunks)
 
         result["success"] = True
         return result
 
     except Exception as e:
-        logger.error(f"Error in RAG query: {e}", exc_info=True)
+        logger.error(f"Error in RAG query with conversation history: {e}", exc_info=True)
         result["error"] = str(e)
         return result
+
+
+def format_sources_for_telegram(chunks: list) -> str:
+    """
+    Форматировать источники для вывода пользователю в Telegram.
+
+    Args:
+        chunks: Список релевантных чанков с метаданными
+
+    Returns:
+        Отформатированная строка с источниками
+    """
+    if not chunks:
+        return "\n📚 Источники: не найдены"
+
+    sources_parts = ["\n" + "="*40]
+    sources_parts.append("📚 ИСТОЧНИКИ")
+    sources_parts.append("="*40)
+
+    for i, chunk in enumerate(chunks, 1):
+        sources_parts.append(
+            f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
+            f"   📊 Релевантность: {chunk['similarity']:.1%}\n"
+            f"   🏷️ Категория: {chunk['tag']}"
+        )
+
+    return "\n".join(sources_parts)
+
+
+def format_rag_response_for_telegram(rag_result: dict) -> str:
+    """
+    Форматировать результат RAG-запроса для вывода в Telegram.
+
+    Args:
+        rag_result: Результат handle_rag_query()
+
+    Returns:
+        Отформатированное сообщение для Telegram
+    """
+    parts = []
+
+    # 1. Ответ от LLM
+    parts.append(rag_result['answer'])
+
+    # 2. Источники
+    parts.append(rag_result['sources_formatted'])
+
+    # 3. Статистика токенов
+    tokens = rag_result['tokens']
+    parts.append(
+        f"\n{'='*40}\n"
+        f"📊 СТАТИСТИКА\n"
+        f"{'='*40}\n"
+        f"• Токенов в запросе: {tokens['prompt_tokens']}\n"
+        f"• Токенов в ответе: {tokens['completion_tokens']}\n"
+        f"• Всего токенов: {tokens['total_tokens']}"
+    )
+
+    return "\n".join(parts)
+
+
+def send_long_message(update: Update, message: str, max_length: int = 4000):
+    """
+    Отправить длинное сообщение, разбивая по необходимости.
+
+    Args:
+        update: Telegram update
+        message: Сообщение для отправки
+        max_length: Максимальная длина одного сообщения
+    """
+    if len(message) <= max_length:
+        update.message.reply_text(message)
+        return
+
+    # Разбить по секциям (по разделителям "===")
+    sections = message.split("="*40)
+
+    current_part = ""
+    for i, section in enumerate(sections):
+        section_with_separator = ("="*40 + section) if i > 0 else section
+
+        if len(current_part) + len(section_with_separator) > max_length:
+            if current_part:
+                update.message.reply_text(current_part)
+            current_part = section_with_separator
+        else:
+            current_part += section_with_separator
+
+    if current_part:
+        update.message.reply_text(current_part)
 
 
 def send_tasks_summary(context: CallbackContext):
