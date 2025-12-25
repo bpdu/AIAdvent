@@ -1064,12 +1064,9 @@ def format_sources_for_telegram(chunks: list) -> str:
     sources_parts.append("📚 ИСТОЧНИКИ")
     sources_parts.append("="*40)
 
-    for i, chunk in enumerate(chunks, 1):
-        sources_parts.append(
-            f"\n{i}. {chunk['method']} {chunk['endpoint_path']}\n"
-            f"   📊 Релевантность: {chunk['similarity']:.1%}\n"
-            f"   🏷️ Категория: {chunk['tag']}"
-        )
+    # Показать общий источник документации
+    sources_parts.append("\n📖 Источник: OpenAPI спецификация Pond Mobile API")
+    sources_parts.append("📁 Файл: resources/dist.json")
 
     return "\n".join(sources_parts)
 
